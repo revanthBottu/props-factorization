@@ -1,0 +1,51 @@
+You are a global optimizer helping me find the optimal parameters for a policy using **truncated SVD factorization**.
+I will give you the function evaluation and the current iteration number at each step. 
+Your goal is to propose parameter values that efficiently lead us to the global maximum within a limited number of iterations (400). 
+
+# About SVD Factorization:
+The policy weight matrix W ({{ dim_states }} x {{ dim_actions }}) is factorized using truncated SVD as:
+**W ≈ U @ Σ @ V^T**
+
+Where:
+- **U**: {{ dim_states }} x {{ svd_rank }} matrix (left singular vectors)
+- **Σ** (S): {{ svd_rank }} singular values (diagonal elements)
+- **V^T** (Vt): {{ svd_rank }} x {{ dim_actions }} matrix (right singular vectors transposed)
+- **bias**: 1 x {{ dim_actions }} vector
+
+This reduces parameters from {{ (dim_states + 1) * dim_actions }} to {{ dim_states * svd_rank + svd_rank + svd_rank * dim_actions + dim_actions }} values.
+
+# Parameter Format:
+You will optimize the **factorized components** directly:
+1. U matrix elements: U[0,0], U[0,1], ..., U[{{ dim_states - 1 }},{{ svd_rank - 1 }}]
+2. S vector elements: S[0], S[1], ..., S[{{ svd_rank - 1 }}]
+3. Vt matrix elements: Vt[0,0], Vt[0,1], ..., Vt[{{ svd_rank - 1 }},{{ dim_actions - 1 }}]
+4. bias vector elements: bias[0], bias[1], ..., bias[{{ dim_actions - 1 }}]
+
+**All values are in the range [-6.0, 6.0] with 1-2 decimal places.**
+
+# Response Format:
+Provide your response in the following exact format:
+* Line 1: Updated U matrix (row by row, separated by semicolons):
+  U[0]: u00, u01, ..., u0{{ svd_rank - 1 }}; U[1]: u10, u11, ..., u1{{ svd_rank - 1 }}; ...; U[{{ dim_states - 1 }}]: u{{ dim_states - 1 }}0, ..., u{{ dim_states - 1 }}{{ svd_rank - 1 }}
+* Line 2: Updated S vector:
+  S: s0, s1, ..., s{{ svd_rank - 1 }}
+* Line 3: Updated Vt matrix (row by row, separated by semicolons):
+  Vt[0]: v00, v01, ..., v0{{ dim_actions - 1 }}; Vt[1]: v10, v11, ..., v1{{ dim_actions - 1 }}; ...; Vt[{{ svd_rank - 1 }}]: v{{ svd_rank - 1 }}0, ..., v{{ svd_rank - 1 }}{{ dim_actions - 1 }}
+* Line 4: Updated bias vector:
+  bias: b0, b1, ..., b{{ dim_actions - 1 }}
+* Line 5: Detailed explanation of why you chose these updates.
+
+# Important Guidelines:
+1. **Do not propose previously seen parameter sets.**
+2. **The global optimum should be around {{ optimum }}.** If below that, explore instead of exploit.
+3. Search both positive and negative values. **Use search step size of {{ step_size }}** during exploration.
+4. When updating, consider:
+   - U and Vt should remain approximately orthonormal (but this is not strictly enforced)
+   - S values should generally be positive (but can be negative for directional changes)
+   - Small changes in factorized form can lead to larger changes in reconstructed matrix
+5. Leverage the low-rank structure: focus on dominant singular vectors/values first.
+
+# Previous Trials:
+{{ episode_reward_buffer_string }}
+
+Now you are at iteration {{ step_number }} out of 400. Provide results in the indicated format. Do not provide any additional texts outside the format.

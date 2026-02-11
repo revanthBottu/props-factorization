@@ -4,11 +4,13 @@ import numpy as np
 import os
 import time
 from jinja2 import Template
-from openai import OpenAI
-import google.generativeai as genai
-import anthropic
+# from openai import OpenAI
+from dotenv import load_dotenv
+from google import genai
+# import anthropic
 import time
 
+load_dotenv()
 
 class LLMBrain:
     def __init__(
@@ -30,6 +32,7 @@ class LLMBrain:
             "gemini-1.5-pro",
             "gemini-2.5-pro-preview-05-06",
             "gemini-2.5-flash-preview-04-17",
+            "gemini-2.5-flash-lite",
             "o3-mini-2025-01-31",
             "gpt-4o-2024-11-20",
             "gpt-4o-2024-08-06",
@@ -38,95 +41,146 @@ class LLMBrain:
         self.llm_model_name = llm_model_name
         if "gemini" in llm_model_name:
             self.model_group = "gemini"
-            genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-        elif "claude" in llm_model_name:
-            self.model_group = "anthropic"
-            self.client = anthropic.Client(api_key=os.environ["ANTHROPIC_API_KEY"])
-        else:
-            self.model_group = "openai"
-            self.client = OpenAI()
+            # get env gemini keys into list
+            self.gemini_api_keys = []
+            key_index = 1
+            while True:
+                key_name = f"GEMINI_API_KEY_{key_index}" if key_index > 1 else "GEMINI_API_KEY"
+                if key_name in os.environ:
+                    self.gemini_api_keys.append(os.environ[key_name])
+                    key_index += 1
+                else:
+                    break
+            
+            if not self.gemini_api_keys:
+                raise ValueError(".env file has no keys.")
+            
+            self.current_gemini_key_index = 0
+            self.gemini_client = genai.Client(api_key=self.gemini_api_keys[self.current_gemini_key_index])
+            print(f"Loaded {len(self.gemini_api_keys)} keys.")
+        # elif "claude" in llm_model_name:
+        #     self.model_group = "anthropic"
+        #     self.client = anthropic.Client(api_key=os.environ["ANTHROPIC_API_KEY"])
+        # else:
+        #     self.model_group = "openai"
+        #     self.client = OpenAI()
+
+    def _rotate_gemini_key(self):
+        """Rotate to the next Gemini API key"""
+        if self.model_group == "gemini" and len(self.gemini_api_keys) > 1:
+            self.current_gemini_key_index = (self.current_gemini_key_index + 1) % len(self.gemini_api_keys)
+            self.gemini_client = genai.Client(api_key=self.gemini_api_keys[self.current_gemini_key_index])
+            print(f"Switched to Gemini API key #{self.current_gemini_key_index + 1}")
 
     def reset_llm_conversation(self):
         self.llm_conversation = []
 
     def add_llm_conversation(self, text, role):
-        if self.model_group == "openai":
-            self.llm_conversation.append({"role": role, "content": text})
-        elif self.model_group == "anthropic":
-            self.llm_conversation.append({"role": role, "content": text})
-        else:
+        # if self.model_group == "openai":
+        #     self.llm_conversation.append({"role": role, "content": text})
+        # elif self.model_group == "anthropic":
+        #     self.llm_conversation.append({"role": role, "content": text})
+        # else:
+        if self.model_group == "gemini":
             self.llm_conversation.append({"role": role, "parts": text})
 
     def query_llm(self):
         for attempt in range(10):
             try:
-                if self.model_group == "openai":
-                    completion = self.client.chat.completions.create(
+                # if self.model_group == "openai":
+                #     completion = self.client.chat.completions.create(
+                #         model=self.llm_model_name,
+                #         messages=self.llm_conversation,
+                #     )
+                #     response = completion.choices[0].message.content
+                # elif self.model_group == "anthropic":
+                #     message = self.client.messages.create(
+                #         model=self.llm_model_name,
+                #         messages=self.llm_conversation,
+                #         max_tokens=1024,
+                #     )
+                #     response = message.content[0].text
+                # else:
+                if self.model_group == "gemini":
+                    # Convert conversation history for new API
+                    contents = []
+                    for msg in self.llm_conversation:
+                        contents.append({"role": msg["role"], "parts": [{"text": msg["parts"]}]})
+                    
+                    response = self.gemini_client.models.generate_content(
                         model=self.llm_model_name,
-                        messages=self.llm_conversation,
-                    )
-                    response = completion.choices[0].message.content
-                elif self.model_group == "anthropic":
-                    message = self.client.messages.create(
-                        model=self.llm_model_name,
-                        messages=self.llm_conversation,
-                        max_tokens=1024,
-                    )
-                    response = message.content[0].text
-                else:
-                    model = genai.GenerativeModel(model_name=self.llm_model_name)
-                    chat_session = model.start_chat(history=self.llm_conversation[:-1])
-                    response = chat_session.send_message(
-                        self.llm_conversation[-1]["parts"]
+                        contents=contents
                     )
                     response = response.text
             except Exception as e:
                 print(f"Error: {e}")
+                
+                # Check if it's a rate limit error and rotate Gemini key
+                if self.model_group == "gemini" and ("429" in str(e) or "quota" in str(e).lower() or "rate" in str(e).lower() or "resource_exhausted" in str(e).lower()):
+                    self._rotate_gemini_key()
+                    print("Retrying with new API key...")
+                    continue
+                
                 print("Retrying...")
                 if attempt == 9:
-                    raise Exception("Failed")
+                    raise Exception("Failed to get response from LLM after 10 attempts")
                 else:
-                    print("Waiting for 60 seconds before retrying...")
+                    print("Gemini charging up...")
                     time.sleep(60)
+                    continue
 
-            if self.model_group == "openai":
-                # add the response to self.llm_conversation
-                self.add_llm_conversation(response, "assistant")
-            else:
+            # if self.model_group == "openai":
+            #     # add the response to self.llm_conversation
+            #     self.add_llm_conversation(response, "assistant")
+            # else:
+            if self.model_group == "gemini":
                 self.add_llm_conversation(response, "model")
 
             return response
+        
+        raise Exception("Failed to get response from LLM after all retry attempts")
 
     def query_llm_multiple_response(self, num_responses, temperature):
         for attempt in range(5):
             try:
-                if self.model_group == "openai":
-                    completion = self.client.chat.completions.create(
-                        model=self.llm_model_name,
-                        messages=self.llm_conversation,
-                        n=num_responses,
-                        temperature=temperature,
-                    )
-                    responses = [
-                        completion.choices[i].message.content
-                        for i in range(num_responses)
-                    ]
-                else:
-                    model = genai.GenerativeModel(model_name=self.llm_model_name)
-                    responses = model.generate_content(
-                        contents=self.llm_conversation,
-                        generation_config=genai.GenerationConfig(
-                            candidate_count=num_responses,
-                            temperature=temperature,
-                        ),
-                    )
-                    responses = [
-                        "\n".join([x.text for x in c.content.parts])
-                        for c in responses.candidates
-                    ]
+                # if self.model_group == "openai":
+                #     completion = self.client.chat.completions.create(
+                #         model=self.llm_model_name,
+                #         messages=self.llm_conversation,
+                #         n=num_responses,
+                #         temperature=temperature,
+                #     )
+                #     responses = [
+                #         completion.choices[i].message.content
+                #         for i in range(num_responses)
+                #     ]
+                # else:
+                if self.model_group == "gemini":
+                    # Convert conversation for new API
+                    contents = []
+                    for msg in self.llm_conversation:
+                        contents.append({"role": msg["role"], "parts": [{"text": msg["parts"]}]})
+                    
+                    # Note: New API may not support multiple candidates in the same way
+                    # Generate multiple responses sequentially
+                    responses = []
+                    for _ in range(num_responses):
+                        response = self.gemini_client.models.generate_content(
+                            model=self.llm_model_name,
+                            contents=contents,
+                            config={"temperature": temperature}
+                        )
+                        responses.append(response.text)
 
             except Exception as e:
                 print(f"Error: {e}")
+                
+                # If rate limit error, attempt to use new API key
+                if self.model_group == "gemini" and ("429" in str(e) or "quota" in str(e).lower() or "rate" in str(e).lower() or "resource_exhausted" in str(e).lower()):
+                    self._rotate_gemini_key()
+                    print("Retrying with new API key...")
+                    continue
+                
                 print("Retrying...")
                 if attempt == 4:
                     raise Exception("Failed")

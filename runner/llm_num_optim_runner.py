@@ -31,6 +31,8 @@ def run_training_loop(
     optimum=1000,
     search_step_size=0.1,
     env_kwargs=None,
+    use_lu_factorization=False,
+    lu_rank=None,
 ):
     assert task in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj", "dist_state_llm_num_optim"]
 
@@ -62,6 +64,8 @@ def run_training_loop(
                 bias,
                 optimum,
                 search_step_size,
+                use_lu_factorization=use_lu_factorization,
+                lu_rank=lu_rank,
             )
         elif task == "cont_space_llm_num_optim_rndm_proj":
             agent = LLMNumOptimRndmPrjAgent(
@@ -139,3 +143,14 @@ def run_training_loop(
                     exit(1)
                 continue
     overall_log_file.close()
+    
+    # Generate animated GIFs from heatmaps after training completes
+    if task in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj"]:
+        print("\n" + "=" * 70)
+        print("Training Complete! Generating animated GIFs from heatmaps...")
+        print("=" * 70)
+        try:
+            agent.create_heatmap_gifs(logdir, duration=500, loop=0)
+        except Exception as e:
+            print(f"Warning: Could not create GIFs: {e}")
+            traceback.print_exc()

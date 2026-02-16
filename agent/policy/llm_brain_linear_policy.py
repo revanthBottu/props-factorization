@@ -10,6 +10,13 @@ from google import genai
 # import anthropic
 import time
 
+try:
+    import ollama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+    print("Warning: ollama package not installed. Local models won't be available.")
+
 load_dotenv()
 
 class LLMBrain:
@@ -22,7 +29,12 @@ class LLMBrain:
         self.llm_si_template = llm_si_template
         self.llm_output_conversion_template = llm_output_conversion_template
         self.llm_conversation = []
-        assert llm_model_name in [
+        
+        # Detect if this is a local model (Ollama format: model:version or starts with llama/qwen/mistral etc)
+        is_local_model = ":" in llm_model_name or any(llm_model_name.lower().startswith(prefix) for prefix in 
+                                                       ["llama", "qwen", "mistral", "phi", "gemma", "codellama"])
+        
+        known_models = [
             "o1-preview",
             "gpt-4o",
             "gemini-2.0-flash-exp",
@@ -38,8 +50,20 @@ class LLMBrain:
             "gpt-4o-2024-08-06",
             "claude-3-7-sonnet-20250219",
         ]
+        
+        if not is_local_model:
+            assert llm_model_name in known_models, f"Unknown model: {llm_model_name}. Use a known model or a local Ollama model."
+        
         self.llm_model_name = llm_model_name
-        if "gemini" in llm_model_name:
+        
+        # Setup model group and client
+        if is_local_model:
+            if not OLLAMA_AVAILABLE:
+                raise ImportError("Ollama package not installed. Install with: pip install ollama")
+            self.model_group = "ollama"
+            self.ollama_client = ollama.Client()
+            print(f"Using local Ollama model: {llm_model_name}")
+        elif "gemini" in llm_model_name:
             self.model_group = "gemini"
             # get env gemini keys into list
             self.gemini_api_keys = []
@@ -83,6 +107,8 @@ class LLMBrain:
         # else:
         if self.model_group == "gemini":
             self.llm_conversation.append({"role": role, "parts": text})
+        elif self.model_group == "ollama":
+            self.llm_conversation.append({"role": role, "content": text})
 
     def query_llm(self):
         for attempt in range(10):
@@ -112,6 +138,13 @@ class LLMBrain:
                         contents=contents
                     )
                     response = response.text
+                elif self.model_group == "ollama":
+                    # Use Ollama for local models
+                    response = self.ollama_client.chat(
+                        model=self.llm_model_name,
+                        messages=self.llm_conversation
+                    )
+                    response = response['message']['content']
             except Exception as e:
                 print(f"Error: {e}")
                 
@@ -135,6 +168,8 @@ class LLMBrain:
             # else:
             if self.model_group == "gemini":
                 self.add_llm_conversation(response, "model")
+            elif self.model_group == "ollama":
+                self.add_llm_conversation(response, "assistant")
 
             return response
         
@@ -171,6 +206,16 @@ class LLMBrain:
                             config={"temperature": temperature}
                         )
                         responses.append(response.text)
+                elif self.model_group == "ollama":
+                    # Generate multiple responses with Ollama
+                    responses = []
+                    for _ in range(num_responses):
+                        response = self.ollama_client.chat(
+                            model=self.llm_model_name,
+                            messages=self.llm_conversation,
+                            options={"temperature": temperature}
+                        )
+                        responses.append(response['message']['content'])
 
             except Exception as e:
                 print(f"Error: {e}")
@@ -277,6 +322,10 @@ class LLMBrain:
         optimum=None,
         search_step_size=0.1,
         actions=None,
+        dim_state=None,
+        dim_action=None,
+        lu_rank=None,
+        use_lu=False,
     ):
         self.reset_llm_conversation()
 
@@ -288,6 +337,9 @@ class LLMBrain:
                 "optimum": str(optimum),
                 "step_size": str(search_step_size),
                 "actions": actions,
+                "dim_state": dim_state,
+                "dim_action": dim_action,
+                "lu_rank": lu_rank,
             }
         )
 

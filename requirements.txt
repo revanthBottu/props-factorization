@@ -1,5 +1,10 @@
 gymnasium
 numpy
 matplotlib
+seaborn
 pyyaml
 jinja2
+Pillow
+google-genai
+ollama
+python-dotenv

@@ -1,0 +1,59 @@
+You are a global optimizer helping me find the global maximum of a mathematical function f(params) using **LU factorization** as a factorized representation.
+I will give you the function evaluation and the current iteration number at each step. 
+Your goal is to propose parameter values that efficiently lead us to the global maximum within a limited number of iterations (400). 
+
+# About LU Factorization:
+Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} x {{ dim_action }}), you will optimize two factorized matrices:
+
+**params = L @ U**
+
+Where:
+- **L**: {{ dim_state }} x {{ lu_rank }} matrix ({{ dim_state }} rows, {{ lu_rank }} columns)
+- **U**: {{ lu_rank }} x {{ dim_action }} matrix ({{ lu_rank }} rows, {{ dim_action }} columns)
+
+This reduces parameters from {{ dim_state * dim_action }} to {{ dim_state * lu_rank + lu_rank * dim_action }} values.
+
+**All values in L and U are in the range [-6.0, 6.0] with 1 decimal place.**
+
+# Here's how we'll interact:
+1. I will first provide MAX_STEPS (400) along with a few training examples showing f(params) values for different L and U matrices.
+2. You will provide your response in the following exact format:
+    * Line 1: "L matrix:" followed on the next **EXACTLY {{ dim_state }} lines** by the L matrix (each line has {{ lu_rank }} comma-separated values)
+    * Line 2: "U matrix:" followed on the next **EXACTLY {{ lu_rank }} lines** by the U matrix (each line has {{ dim_action }} comma-separated values)
+    * Line 3: A detailed explanation of why you chose those matrices.
+3. I will then compute params = L @ U, evaluate f(params), and provide the value along with the current iteration.
+4. We will repeat steps 2-3 until we reach the maximum number of iterations.
+
+# CRITICAL: Your L matrix MUST have exactly {{ dim_state }} rows (each with {{ lu_rank }} values).
+# CRITICAL: Your U matrix MUST have exactly {{ lu_rank }} rows (each with {{ dim_action }} values).
+
+# Output Format Example (for THIS problem with {{ dim_state }} states, {{ lu_rank }} rank, {{ dim_action }} actions):
+L matrix:
+{% for i in range(dim_state) -%}
+{% for j in range(lu_rank) -%}
+{{ "%.1f" | format((loop.index0 - lu_rank/2) * 0.5) }}{{ ", " if not loop.last else "" }}
+{%- endfor %}
+{{ "" if loop.last else "\n" }}
+{%- endfor %}
+U matrix:
+{% for i in range(lu_rank) -%}
+{% for j in range(dim_action) -%}
+{{ "%.1f" | format((loop.index0 - dim_action/2) * 0.8) }}{{ ", " if not loop.last else "" }}
+{%- endfor %}
+{{ "" if loop.last else "\n" }}
+{%- endfor %}
+Explanation: Your reasoning here...
+
+# Remember:
+1. **CRITICAL: Do not propose ANY L and U matrices that appear in the history below. Every proposal must be unique.**
+2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. You should explore instead of exploiting.
+3. Search both positive and negative values. **During exploration, use search step size of {{ step_size }}**.
+4. **Small changes in L or U can cause large changes in params = L @ U** due to matrix multiplication.
+
+
+Next, you will see examples of L, U matrices and their corresponding f(params) values.
+{{ episode_reward_buffer_string }}
+
+Now you are at iteration {{step_number}} out of 400. 
+**Review the complete history above and ensure your proposal is different from ALL previous L and U matrices.**
+Please provide the results in the indicated format. Do not provide any additional texts.

@@ -9,13 +9,21 @@ from dotenv import load_dotenv
 from google import genai
 # import anthropic
 import time
+import torch
+
+try:
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    HUGGINGFACE_AVAILABLE = True
+except ImportError:
+    HUGGINGFACE_AVAILABLE = False
+    print("Warning: transformers package not installed. HuggingFace models won't be available.")
 
 try:
     import ollama
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
-    print("Warning: ollama package not installed. Local models won't be available.")
+    print("Warning: ollama package not installed. Ollama models won't be available.")
 
 load_dotenv()
 
@@ -30,9 +38,14 @@ class LLMBrain:
         self.llm_output_conversion_template = llm_output_conversion_template
         self.llm_conversation = []
         
-        # Detect if this is a local model (Ollama format: model:version or starts with llama/qwen/mistral etc)
-        is_local_model = ":" in llm_model_name or any(llm_model_name.lower().startswith(prefix) for prefix in 
-                                                       ["llama", "qwen", "mistral", "phi", "gemma", "codellama"])
+        # Detect if this is a HuggingFace model (contains / indicating org/model format)
+        # HuggingFace paths: "Qwen/Qwen3.5-72B-Instruct", "meta-llama/Llama-3.1-70B", etc.
+        is_hf_model = "/" in llm_model_name
+        
+        # Detect if this is an Ollama model (model:version format or common local model names)
+        # Ollama examples: "llama3:70b", "qwen:14b", "mistral:latest"
+        is_ollama_model = (not is_hf_model) and (":" in llm_model_name or any(llm_model_name.lower().startswith(prefix) for prefix in 
+                                                       ["llama", "qwen", "mistral", "phi", "gemma", "codellama"]))
         
         known_models = [
             "o1-preview",
@@ -51,18 +64,55 @@ class LLMBrain:
             "claude-3-7-sonnet-20250219",
         ]
         
-        if not is_local_model:
-            assert llm_model_name in known_models, f"Unknown model: {llm_model_name}. Use a known model or a local Ollama model."
+        if not is_hf_model and not is_ollama_model:
+            assert llm_model_name in known_models, f"Unknown model: {llm_model_name}. Use a known model, an Ollama model, or a HuggingFace model."
         
         self.llm_model_name = llm_model_name
         
         # Setup model group and client
-        if is_local_model:
+        if is_hf_model:
+            if not HUGGINGFACE_AVAILABLE:
+                raise ImportError("HuggingFace transformers not installed. Install with: pip install transformers bitsandbytes accelerate")
+            self.model_group = "huggingface"
+            
+            print(f"Loading HuggingFace model: {llm_model_name}")
+            
+            # Load tokenizer
+            self.hf_tokenizer = AutoTokenizer.from_pretrained(llm_model_name)
+            
+            # Configure 4-bit quantization
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4"
+            )
+            
+            # Load model with quantization
+            self.hf_model = AutoModelForCausalLM.from_pretrained(
+                llm_model_name,
+                quantization_config=quantization_config,
+                device_map="auto",
+                dtype=torch.bfloat16,
+                trust_remote_code=True
+            )
+            
+            # Remove unsupported generation parameters to avoid warnings
+            if hasattr(self.hf_model, 'generation_config'):
+                self.hf_model.generation_config.top_p = None
+                self.hf_model.generation_config.top_k = None
+            
+            # Set pad token if not present
+            if self.hf_tokenizer.pad_token is None:
+                self.hf_tokenizer.pad_token = self.hf_tokenizer.eos_token
+            
+            print(f"Successfully loaded HuggingFace model with 4-bit quantization")
+        elif is_ollama_model:
             if not OLLAMA_AVAILABLE:
                 raise ImportError("Ollama package not installed. Install with: pip install ollama")
             self.model_group = "ollama"
             self.ollama_client = ollama.Client()
-            print(f"Using local Ollama model: {llm_model_name}")
+            print(f"Using Ollama model: {llm_model_name}")
         elif "gemini" in llm_model_name:
             self.model_group = "gemini"
             # get env gemini keys into list
@@ -95,6 +145,35 @@ class LLMBrain:
             self.current_gemini_key_index = (self.current_gemini_key_index + 1) % len(self.gemini_api_keys)
             self.gemini_client = genai.Client(api_key=self.gemini_api_keys[self.current_gemini_key_index])
             print(f"Switched to Gemini API key #{self.current_gemini_key_index + 1}")
+    
+    def _format_hf_chat(self):
+        """Format conversation history for HuggingFace chat models"""
+        # Try to use the model's chat template if available
+        if hasattr(self.hf_tokenizer, 'apply_chat_template') and self.hf_tokenizer.chat_template is not None:
+            try:
+                return self.hf_tokenizer.apply_chat_template(
+                    self.llm_conversation,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+            except:
+                pass
+        
+        # Fallback to manual formatting
+        prompt = ""
+        for msg in self.llm_conversation:
+            role = msg["role"]
+            content = msg["content"]
+            if role == "user":
+                prompt += f"<|user|>\n{content}\n"
+            elif role == "assistant":
+                prompt += f"<|assistant|>\n{content}\n"
+            elif role == "system":
+                prompt += f"<|system|>\n{content}\n"
+        
+        # Add generation prompt
+        prompt += "<|assistant|>\n"
+        return prompt
 
     def reset_llm_conversation(self):
         self.llm_conversation = []
@@ -107,6 +186,8 @@ class LLMBrain:
         # else:
         if self.model_group == "gemini":
             self.llm_conversation.append({"role": role, "parts": text})
+        elif self.model_group == "huggingface":
+            self.llm_conversation.append({"role": role, "content": text})
         elif self.model_group == "ollama":
             self.llm_conversation.append({"role": role, "content": text})
 
@@ -138,6 +219,25 @@ class LLMBrain:
                         contents=contents
                     )
                     response = response.text
+                elif self.model_group == "huggingface":
+                    # Use HuggingFace transformers
+                    # Format conversation for chat template
+                    prompt = self._format_hf_chat()
+                    
+                    # Tokenize and generate
+                    inputs = self.hf_tokenizer(prompt, return_tensors="pt", padding=True).to(self.hf_model.device)
+                    
+                    with torch.no_grad():
+                        outputs = self.hf_model.generate(
+                            **inputs,
+                            max_new_tokens=2048,
+                            do_sample=False,
+                            temperature=1.0,
+                            pad_token_id=self.hf_tokenizer.pad_token_id
+                        )
+                    
+                    # Decode only the new tokens
+                    response = self.hf_tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
                 elif self.model_group == "ollama":
                     # Use Ollama for local models
                     response = self.ollama_client.chat(
@@ -168,6 +268,8 @@ class LLMBrain:
             # else:
             if self.model_group == "gemini":
                 self.add_llm_conversation(response, "model")
+            elif self.model_group == "huggingface":
+                self.add_llm_conversation(response, "assistant")
             elif self.model_group == "ollama":
                 self.add_llm_conversation(response, "assistant")
 
@@ -206,6 +308,23 @@ class LLMBrain:
                             config={"temperature": temperature}
                         )
                         responses.append(response.text)
+                elif self.model_group == "huggingface":
+                    # Generate multiple responses with HuggingFace
+                    responses = []
+                    prompt = self._format_hf_chat()
+                    inputs = self.hf_tokenizer(prompt, return_tensors="pt", padding=True).to(self.hf_model.device)
+                    
+                    for _ in range(num_responses):
+                        with torch.no_grad():
+                            outputs = self.hf_model.generate(
+                                **inputs,
+                                max_new_tokens=2048,
+                                do_sample=True,
+                                temperature=temperature,
+                                pad_token_id=self.hf_tokenizer.pad_token_id
+                            )
+                        response = self.hf_tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+                        responses.append(response)
                 elif self.model_group == "ollama":
                     # Generate multiple responses with Ollama
                     responses = []

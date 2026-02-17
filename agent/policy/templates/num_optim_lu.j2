@@ -18,30 +18,21 @@ This reduces parameters from {{ dim_state * dim_action }} to {{ dim_state * lu_r
 # Here's how we'll interact:
 1. I will first provide MAX_STEPS (400) along with a few training examples showing f(params) values for different L and U matrices.
 2. You will provide your response in the following exact format:
-    * Line 1: "L matrix:" followed on the next **EXACTLY {{ dim_state }} lines** by the L matrix (each line has {{ lu_rank }} comma-separated values)
-    * Line 2: "U matrix:" followed on the next **EXACTLY {{ lu_rank }} lines** by the U matrix (each line has {{ dim_action }} comma-separated values)
+    * Line 1: "L matrix:" followed on the next {{ dim_state }} lines by the L matrix ({{ lu_rank }} comma-separated values per row)
+    * Line 2: "U matrix:" followed on the next {{ lu_rank }} lines by the U matrix ({{ dim_action }} comma-separated values per row)
     * Line 3: A detailed explanation of why you chose those matrices.
 3. I will then compute params = L @ U, evaluate f(params), and provide the value along with the current iteration.
 4. We will repeat steps 2-3 until we reach the maximum number of iterations.
 
-# CRITICAL: Your L matrix MUST have exactly {{ dim_state }} rows (each with {{ lu_rank }} values).
-# CRITICAL: Your U matrix MUST have exactly {{ lu_rank }} rows (each with {{ dim_action }} values).
-
-# Output Format Example (for THIS problem with {{ dim_state }} states, {{ lu_rank }} rank, {{ dim_action }} actions):
+# Output Format Example:
 L matrix:
-{% for i in range(dim_state) -%}
-{% for j in range(lu_rank) -%}
-{{ "%.1f" | format((loop.index0 - lu_rank/2) * 0.5) }}{{ ", " if not loop.last else "" }}
-{%- endfor %}
-{{ "" if loop.last else "\n" }}
-{%- endfor %}
+1.2, -0.5, 2.3
+0.8, 1.9, -1.1
+...
 U matrix:
-{% for i in range(lu_rank) -%}
-{% for j in range(dim_action) -%}
-{{ "%.1f" | format((loop.index0 - dim_action/2) * 0.8) }}{{ ", " if not loop.last else "" }}
-{%- endfor %}
-{{ "" if loop.last else "\n" }}
-{%- endfor %}
+-2.1, 1.4
+0.9, -1.7
+1.3, 2.2
 Explanation: Your reasoning here...
 
 # Remember:

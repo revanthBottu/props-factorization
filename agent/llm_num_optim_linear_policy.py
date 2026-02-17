@@ -9,6 +9,8 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import gymnasium as gym
+from gymnasium.wrappers import RecordVideo
 
 
 class LLMNumOptimAgent:
@@ -77,6 +79,9 @@ class LLMNumOptimAgent:
         # Track rewards for visualization - separate warmup and training
         self.warmup_rewards = []
         self.training_rewards = []
+        
+        # Track best reward for conditional video recording
+        self.best_reward = -float('inf')
 
         if self.bias:
             self.dim_state += 1
@@ -117,6 +122,46 @@ class LLMNumOptimAgent:
                 self.policy.get_parameters(), world.get_accu_reward()
             )
         return world.get_accu_reward()
+
+    def record_best_episode(self, world: BaseWorld, logdir):
+        """Record a video of the best performing policy."""
+        try:
+            # Create videos directory
+            video_dir = f"{logdir}/best_videos"
+            os.makedirs(video_dir, exist_ok=True)
+            
+            # Create a new environment with video recording wrapper
+            env = gym.make(world.gym_env_name, render_mode="rgb_array")
+            env = RecordVideo(
+                env, 
+                video_dir,
+                episode_trigger=lambda x: True,  # Record every episode
+                name_prefix=f"best_episode_{self.training_episodes}_reward_{self.best_reward:.0f}"
+            )
+            
+            # Run one episode with the current policy
+            state, _ = env.reset()
+            state = np.expand_dims(state, axis=0)
+            done = False
+            total_reward = 0
+            
+            while not done:
+                action = self.policy.get_action(state.T)
+                action = np.reshape(action, (1, self.dim_action))
+                if world.discretize:
+                    action = np.argmax(action)
+                    action = np.array([action])
+                
+                next_state, reward, terminated, truncated, _ = env.step(action[0])
+                total_reward += reward
+                done = terminated or truncated
+                state = np.expand_dims(next_state, axis=0)
+            
+            env.close()
+            print(f"✓ Video saved to {video_dir}/ (reward: {total_reward:.2f})")
+            
+        except Exception as e:
+            print(f"Warning: Could not record video: {e}")
 
     def random_warmup(self, world: BaseWorld, logdir, num_episodes):
         for episode in range(num_episodes):
@@ -336,6 +381,13 @@ class LLMNumOptimAgent:
         
         # Track training rewards only
         self.training_rewards.append(result)
+        
+        # Record video if this is a new best reward
+        if result > self.best_reward:
+            print(f"\n🎉 New best reward! {result:.2f} > {self.best_reward:.2f}")
+            print(f"Recording video of best performance...")
+            self.best_reward = result
+            self.record_best_episode(world, logdir)
         
         # Create visualizations iteratively after each LLM call
         print(f"\n[Visualization] Generating plots for episode {self.training_episodes}...")

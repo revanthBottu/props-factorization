@@ -1,10 +1,17 @@
 gymnasium
+gymnasium[mujoco]
+pygame
 numpy
 matplotlib
 seaborn
 pyyaml
 jinja2
 Pillow
+scipy
 google-genai
 ollama
+transformers
+accelerate
+bitsandbytes
+torch
 python-dotenv

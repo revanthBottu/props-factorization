@@ -37,6 +37,7 @@ class LLMBrain:
         self.llm_si_template = llm_si_template
         self.llm_output_conversion_template = llm_output_conversion_template
         self.llm_conversation = []
+        self.use_cuda = False  # Track if we're using CUDA
         
         # Detect if this is a HuggingFace model (contains / indicating org/model format)
         # HuggingFace paths: "Qwen/Qwen3.5-72B-Instruct", "meta-llama/Llama-3.1-70B", etc.
@@ -80,22 +81,48 @@ class LLMBrain:
             # Load tokenizer
             self.hf_tokenizer = AutoTokenizer.from_pretrained(llm_model_name)
             
-            # Configure 4-bit quantization
-            quantization_config = BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=torch.bfloat16,
-                bnb_4bit_use_double_quant=True,
-                bnb_4bit_quant_type="nf4"
-            )
+            # Detect if model is pre-quantized (FP8, GPTQ, AWQ, Mxfp4, or gpt-oss)
+            # gpt-oss uses Mxfp4 quantization
+            is_prequantized = any(x in llm_model_name.lower() for x in ['fp8', 'gptq', 'awq', 'int4', 'int8', 'gpt-oss', '-oss'])
             
-            # Load model with quantization
-            self.hf_model = AutoModelForCausalLM.from_pretrained(
-                llm_model_name,
-                quantization_config=quantization_config,
-                device_map="auto",
-                dtype=torch.bfloat16,
-                trust_remote_code=True
-            )
+            if is_prequantized:
+                print(f"Detected pre-quantized model (Mxfp4/other), loading without additional quantization")
+                print(f"Enabling CPU offloading: 60GB GPU + 350GB RAM available")
+                # Load pre-quantized model with CPU offloading
+                self.hf_model = AutoModelForCausalLM.from_pretrained(
+                    llm_model_name,
+                    device_map="auto",
+                    trust_remote_code=True,
+                    dtype="auto",
+                    low_cpu_mem_usage=True,
+                    max_memory={0: "60GiB", "cpu": "350GiB"},  # Reduced GPU to leave room for generation
+                    offload_folder="offload",
+                    offload_state_dict=True
+                )
+                print("Successfully loaded pre-quantized model with CPU offloading enabled")
+            else:
+                print(f"Loading model with 4-bit quantization (required for 120B+ models)")
+                print(f"Enabling CPU offloading: 60GB GPU + 350GB RAM available")
+                # Configure 4-bit quantization for large models
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.bfloat16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4"
+                )
+                
+                # Load model with quantization and CPU offloading
+                self.hf_model = AutoModelForCausalLM.from_pretrained(
+                    llm_model_name,
+                    quantization_config=quantization_config,
+                    device_map="auto",
+                    dtype=torch.bfloat16,
+                    trust_remote_code=True,
+                    low_cpu_mem_usage=True,
+                    max_memory={0: "60GiB", "cpu": "350GiB"},
+                    offload_folder="offload"
+                )
+                print("Successfully loaded with 4-bit quantization and CPU offloading")
             
             # Remove unsupported generation parameters to avoid warnings
             if hasattr(self.hf_model, 'generation_config'):
@@ -106,7 +133,11 @@ class LLMBrain:
             if self.hf_tokenizer.pad_token is None:
                 self.hf_tokenizer.pad_token = self.hf_tokenizer.eos_token
             
-            print(f"Successfully loaded HuggingFace model with 4-bit quantization")
+            quant_status = "pre-quantized" if is_prequantized else "4-bit quantization"
+            print(f"Successfully loaded HuggingFace model with {quant_status}")
+            
+            # Track if model is on CUDA
+            self.use_cuda = torch.cuda.is_available() and next(self.hf_model.parameters()).is_cuda
         elif is_ollama_model:
             if not OLLAMA_AVAILABLE:
                 raise ImportError("Ollama package not installed. Install with: pip install ollama")
@@ -178,6 +209,12 @@ class LLMBrain:
     def reset_llm_conversation(self):
         self.llm_conversation = []
 
+    def clear_cache(self):
+        """Clear GPU cache to prevent OOM between episodes."""
+        if self.use_cuda:
+            torch.cuda.empty_cache()
+            print("[Memory] GPU cache cleared")
+
     def add_llm_conversation(self, text, role):
         # if self.model_group == "openai":
         #     self.llm_conversation.append({"role": role, "content": text})
@@ -230,14 +267,20 @@ class LLMBrain:
                     with torch.no_grad():
                         outputs = self.hf_model.generate(
                             **inputs,
-                            max_new_tokens=2048,
-                            do_sample=False,
-                            temperature=1.0,
-                            pad_token_id=self.hf_tokenizer.pad_token_id
+                            max_new_tokens=384,  # Reduced for memory - still enough for LU matrices
+                            do_sample=True,
+                            temperature=0.7,
+                            pad_token_id=self.hf_tokenizer.pad_token_id,
+                            use_cache=True
                         )
                     
                     # Decode only the new tokens
                     response = self.hf_tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+                    
+                    # Immediate memory cleanup to prevent OOM
+                    del inputs, outputs
+                    if self.use_cuda:
+                        torch.cuda.empty_cache()
                 elif self.model_group == "ollama":
                     # Use Ollama for local models
                     response = self.ollama_client.chat(
@@ -318,13 +361,19 @@ class LLMBrain:
                         with torch.no_grad():
                             outputs = self.hf_model.generate(
                                 **inputs,
-                                max_new_tokens=2048,
+                                max_new_tokens=384,  # Reduced for memory
                                 do_sample=True,
                                 temperature=temperature,
-                                pad_token_id=self.hf_tokenizer.pad_token_id
+                                pad_token_id=self.hf_tokenizer.pad_token_id,
+                                use_cache=True
                             )
                         response = self.hf_tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
                         responses.append(response)
+                        
+                        # Clean up after each response
+                        del outputs
+                        if self.use_cuda:
+                            torch.cuda.empty_cache()
                 elif self.model_group == "ollama":
                     # Generate multiple responses with Ollama
                     responses = []

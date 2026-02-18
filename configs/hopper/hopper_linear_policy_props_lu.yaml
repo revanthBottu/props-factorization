@@ -1,6 +1,6 @@
 task: cont_space_llm_num_optim
 num_episodes: 395
-gym_env_name: Hopper-v3
+gym_env_name: Hopper-v5
 render_mode: null
 logdir: logs/hopper_lu
 dim_actions: 3

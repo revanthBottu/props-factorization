@@ -11,6 +11,7 @@ scipy
 google-genai
 ollama
 transformers
+moviepy
 accelerate
 bitsandbytes
 torch

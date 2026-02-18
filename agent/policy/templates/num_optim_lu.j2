@@ -24,16 +24,41 @@ This reduces parameters from {{ dim_state * dim_action }} to {{ dim_state * lu_r
 3. I will then compute params = L @ U, evaluate f(params), and provide the value along with the current iteration.
 4. We will repeat steps 2-3 until we reach the maximum number of iterations.
 
-# Output Format Example:
+# Output Format:
 L matrix:
 1.2, -0.5, 2.3
 0.8, 1.9, -1.1
-...
+
 U matrix:
 -2.1, 1.4
 0.9, -1.7
 1.3, 2.2
 Explanation: Your reasoning here...
+
+# STRICT EXAMPLE FOR THIS SPECIFIC PROBLEM ({{ dim_state }} states, {{ dim_action }} actions, rank {{ lu_rank }}):
+Your response MUST follow this EXACT format:
+
+L matrix:
+0.5, 1.2, -0.8, 2.1
+-1.3, 0.9, 1.5, -0.4
+2.0, -1.1, 0.3, 1.8
+0.7, -2.3, 1.6, 0.2
+-0.9, 1.4, -1.7, 2.5
+1.8, 0.6, -2.0, -1.2
+-1.5, 2.2, 0.4, 1.1
+0.3, -0.7, 2.8, -1.9
+1.9, -1.4, 0.8, 0.5
+-2.1, 0.2, 1.3, -0.6
+0.4, 1.7, -1.0, 2.3
+U matrix:
+1.5, -0.8, 2.0
+-1.2, 2.3, 0.5
+0.9, -1.6, 1.1
+2.1, 0.4, -1.8
+Explanation: I chose these values based on analysis of the history...
+
+CRITICAL: Your L matrix must have EXACTLY {{ dim_state }} rows with {{ lu_rank }} numbers each (as shown above).
+CRITICAL: Your U matrix must have EXACTLY {{ lu_rank }} rows with {{ dim_action }} numbers each (as shown above).
 
 # Remember:
 1. **CRITICAL: Do not propose ANY L and U matrices that appear in the history below. Every proposal must be unique.**
@@ -47,4 +72,11 @@ Next, you will see examples of L, U matrices and their corresponding f(params) v
 
 Now you are at iteration {{step_number}} out of 400. 
 **Review the complete history above and ensure your proposal is different from ALL previous L and U matrices.**
+
+CRITICAL FORMAT REQUIREMENTS:
+- L matrix: EXACTLY {{ dim_state }} rows, each with EXACTLY {{ lu_rank }} numbers
+- U matrix: EXACTLY {{ lu_rank }} rows, each with EXACTLY {{ dim_action }} numbers
+- One number per value, comma-separated
+- Start with "L matrix:" then "U matrix:" then "Explanation:"
+
 Please provide the results in the indicated format. Do not provide any additional texts.

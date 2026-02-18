@@ -9,6 +9,10 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+
+# Enable headless rendering for video recording on servers without display
+os.environ['MUJOCO_GL'] = 'egl'
+
 import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
 
@@ -207,6 +211,8 @@ class LLMNumOptimAgent:
             bias_vector = []
             
             current_section = None
+            expected_L_cols = self.lu_rank
+            expected_U_cols = self.policy.dim_actions
             
             for line in lines:
                 line = line.strip()
@@ -224,20 +230,42 @@ class LLMNumOptimAgent:
                 
                 # Parse numerical values
                 if current_section and line and not line.startswith('Explanation') and not line.startswith('Note'):
-                    # Extract numbers from the line
-                    numbers = re.findall(r'[+-]?\d+\.?\d*', line)
+                    # Extract numbers from the line (including negative numbers and decimals)
+                    numbers = re.findall(r'[+-]?\d+(?:\.\d+)?', line)
                     if numbers:
                         row = [float(x) for x in numbers]
+                        
+                        # Validate row length before adding
                         if current_section == 'L':
-                            L_matrix.append(row)
+                            if len(row) == expected_L_cols:
+                                L_matrix.append(row)
+                            else:
+                                print(f"Warning: Skipping L row with {len(row)} values (expected {expected_L_cols}): {row}")
                         elif current_section == 'U':
-                            U_matrix.append(row)
+                            if len(row) == expected_U_cols:
+                                U_matrix.append(row)
+                            else:
+                                print(f"Warning: Skipping U row with {len(row)} values (expected {expected_U_cols}): {row}")
                         elif current_section == 'bias':
                             bias_vector.extend(row)
             
-            # Convert to numpy arrays
-            L = np.array(L_matrix)
-            U = np.array(U_matrix)
+            print(f"Parsed {len(L_matrix)} L rows, {len(U_matrix)} U rows")
+            
+            # Convert to numpy arrays with validation
+            try:
+                L = np.array(L_matrix)
+            except ValueError as e:
+                print(f"ERROR creating L matrix: {e}")
+                print(f"L_matrix content: {L_matrix}")
+                return {'L': self.policy.L.copy(), 'U': self.policy.U_matrix.copy(), 'bias': self.policy.bias.copy()}
+            
+            try:
+                U = np.array(U_matrix)
+            except ValueError as e:
+                print(f"ERROR creating U matrix: {e}")
+                print(f"U_matrix content: {U_matrix}")
+                return {'L': self.policy.L.copy(), 'U': self.policy.U_matrix.copy(), 'bias': self.policy.bias.copy()}
+            
             bias = np.array(bias_vector).reshape(1, -1) if bias_vector else self.policy.bias
             
             print(f"Parsed L shape: {L.shape}, U shape: {U.shape}, bias shape: {bias.shape}")
@@ -394,6 +422,9 @@ class LLMNumOptimAgent:
         self.plot_reward_progress(logdir)
         self.plot_policy_heatmap(logdir)
         print(f"[Visualization] Plots saved to {logdir}")
+
+        # Clear GPU memory after episode to prevent OOM
+        self.llm_brain.clear_cache()
 
         self.training_episodes += 1
 

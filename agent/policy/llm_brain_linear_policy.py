@@ -492,8 +492,8 @@ class LLMBrain:
         actions=None,
         dim_state=None,
         dim_action=None,
-        lu_rank=None,
-        use_lu=False,
+        factor_rank=None,
+        use_factorized=False,
     ):
         self.reset_llm_conversation()
 
@@ -507,7 +507,7 @@ class LLMBrain:
                 "actions": actions,
                 "dim_state": dim_state,
                 "dim_action": dim_action,
-                "lu_rank": lu_rank,
+                "factor_rank": factor_rank,
             }
         )
 

@@ -40,8 +40,8 @@ def test_gif_creation():
     print("-" * 70)
     
     # Test creating both GIFs
-    print("\nTest 1: Creating both policy and LU heatmap GIFs...")
-    policy_gif, lu_gif = create_both_gifs(
+    print("\nTest 1: Creating both policy and factorized policy heatmap GIFs...")
+    policy_gif, factor_gif = create_both_gifs(
         logdir=test_dir,
         duration=500,
         loop=0
@@ -52,16 +52,16 @@ def test_gif_creation():
     else:
         print("✗ Policy heatmap GIF creation failed or no images found")
     
-    if lu_gif:
-        print(f"✓ LU factorization GIF created successfully: {lu_gif}")
+    if factor_gif:
+        print(f"✓ Factorized policy GIF created successfully: {factor_gif}")
     else:
-        print("✗ LU factorization GIF creation failed or no images found")
+        print("✗ Factorized policy GIF creation failed or no images found")
     
     print("\n" + "=" * 70)
     print("Test Complete!")
     print("=" * 70)
     
-    if policy_gif or lu_gif:
+    if policy_gif or factor_gif:
         print("\nYou can view the generated GIF(s) in the log directory.")
     else:
         print("\nNo GIFs were created. Make sure heatmap images exist in the log directory.")

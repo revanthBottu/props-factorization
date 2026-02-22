@@ -14,7 +14,7 @@ import argparse
 
 
 def create_heatmap_gif(logdir, output_filename="policy_heatmaps.gif", 
-                       heatmap_type="policy_lu_heatmap", duration=500, loop=0):
+                       heatmap_type="policy_factor_heatmap", duration=500, loop=0):
     """
     Create an animated GIF from policy heatmap images.
     
@@ -23,7 +23,7 @@ def create_heatmap_gif(logdir, output_filename="policy_heatmaps.gif",
         output_filename (str): Name of the output GIF file
         heatmap_type (str): Type of heatmap to collect. Options:
                            - "policy_heatmap" : Single policy weight heatmap
-                           - "policy_lu_heatmap" : Combined L, U, and reconstructed weight heatmap
+                           - "policy_factor_heatmap" : Combined L, U, and policy weight heatmap
         duration (int): Duration of each frame in milliseconds (default 500ms)
         loop (int): Number of times to loop (0 = infinite loop)
     
@@ -105,7 +105,7 @@ def create_heatmap_gif(logdir, output_filename="policy_heatmaps.gif",
 
 def create_both_gifs(logdir, duration=500, loop=0):
     """
-    Create GIFs for both policy heatmap and LU factorization heatmap.
+    Create GIFs for both the policy weight heatmap and factorized policy (L, U) heatmap.
     
     Args:
         logdir (str): Directory containing the heatmap images
@@ -113,7 +113,7 @@ def create_both_gifs(logdir, duration=500, loop=0):
         loop (int): Number of times to loop (0 = infinite loop)
     
     Returns:
-        tuple: Paths to (policy_gif, lu_gif) or None for failed ones
+        tuple: Paths to (policy_gif, factor_gif) or None for failed ones
     """
     print("=" * 60)
     print("Creating Policy Weight Heatmap GIF...")
@@ -127,17 +127,17 @@ def create_both_gifs(logdir, duration=500, loop=0):
     )
     
     print("\n" + "=" * 60)
-    print("Creating LU Factorization Heatmap GIF...")
+    print("Creating Factorized Policy (L, U) Heatmap GIF...")
     print("=" * 60)
-    lu_gif = create_heatmap_gif(
+    factor_gif = create_heatmap_gif(
         logdir,
-        output_filename="policy_lu_heatmaps.gif",
-        heatmap_type="policy_lu_heatmap",
+        output_filename="policy_factor_heatmaps.gif",
+        heatmap_type="policy_factor_heatmap",
         duration=duration,
         loop=loop
     )
     
-    return policy_gif, lu_gif
+    return policy_gif, factor_gif
 
 
 def main():
@@ -153,7 +153,7 @@ def main():
         "--type",
         type=str,
         default="both",
-        choices=["policy", "lu", "both"],
+        choices=["policy", "factor", "both"],
         help="Type of heatmap to create GIF for (default: both)"
     )
     parser.add_argument(
@@ -192,12 +192,12 @@ def main():
             loop=args.loop
         )
     
-    elif args.type == "lu":
-        output_filename = args.output or "policy_lu_heatmaps.gif"
+    elif args.type == "factor":
+        output_filename = args.output or "policy_factor_heatmaps.gif"
         create_heatmap_gif(
             args.logdir,
             output_filename=output_filename,
-            heatmap_type="policy_lu_heatmap",
+            heatmap_type="policy_factor_heatmap",
             duration=args.duration,
             loop=args.loop
         )

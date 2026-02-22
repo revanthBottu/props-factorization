@@ -31,8 +31,8 @@ def run_training_loop(
     optimum=1000,
     search_step_size=0.1,
     env_kwargs=None,
-    use_lu_factorization=False,
-    lu_rank=None,
+    use_factorized_policy=False,
+    factor_rank=None,
 ):
     assert task in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj", "dist_state_llm_num_optim"]
 
@@ -64,8 +64,8 @@ def run_training_loop(
                 bias,
                 optimum,
                 search_step_size,
-                use_lu_factorization=use_lu_factorization,
-                lu_rank=lu_rank,
+                use_factorized_policy=use_factorized_policy,
+                factor_rank=factor_rank,
             )
         elif task == "cont_space_llm_num_optim_rndm_proj":
             agent = LLMNumOptimRndmPrjAgent(

@@ -9,9 +9,12 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import platform
 
 # Enable headless rendering for video recording on servers without display
-os.environ['MUJOCO_GL'] = 'egl'
+# Only use 'egl' on Linux; Windows uses 'glfw' by default
+if platform.system() == 'Linux':
+    os.environ['MUJOCO_GL'] = 'egl'
 
 import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
@@ -32,8 +35,8 @@ class LLMNumOptimAgent:
         bias,
         optimum,
         search_step_size,
-        use_lu_factorization=False,
-        lu_rank=None,
+        use_factorized_policy=False,
+        factor_rank=None,
     ):
         self.start_time = time.process_time()
         self.api_call_time = 0
@@ -44,7 +47,7 @@ class LLMNumOptimAgent:
         self.bias = bias
         self.optimum = optimum
         self.search_step_size = search_step_size
-        self.use_lu_factorization = use_lu_factorization
+        self.use_factorized_policy = use_factorized_policy
 
         if not self.bias:
             param_count = dim_action * dim_state
@@ -52,14 +55,14 @@ class LLMNumOptimAgent:
             param_count = dim_action * dim_state + dim_action
         self.rank = param_count
         
-        # Setup LU rank
-        if use_lu_factorization:
-            if lu_rank is None:
-                self.lu_rank = max(1, min(dim_state, dim_action) // 2)
+        # Setup factor rank for two-matrix policy representation
+        if use_factorized_policy:
+            if factor_rank is None:
+                self.factor_rank = max(1, min(dim_state, dim_action) // 2)
             else:
-                self.lu_rank = lu_rank
+                self.factor_rank = factor_rank
         else:
-            self.lu_rank = None
+            self.factor_rank = None
 
         if not self.bias:
             self.policy = LinearPolicyNoBias(
@@ -69,8 +72,8 @@ class LLMNumOptimAgent:
             self.policy = LinearPolicy(
                 dim_actions=dim_action, 
                 dim_states=dim_state,
-                use_lu_factorization=use_lu_factorization,
-                lu_rank=self.lu_rank
+                use_factorized_policy=use_factorized_policy,
+                factor_rank=self.factor_rank
             )
         self.replay_buffer = EpisodeRewardBufferNoBias(max_size=max_traj_count)
         self.llm_brain = LLMBrain(
@@ -97,7 +100,7 @@ class LLMNumOptimAgent:
         # Get parameters for logging
         params = self.policy.get_parameters()
         if isinstance(params, dict):
-            # For LU factorization, log the reconstructed weight
+            # For factorized policy, log the reconstructed weight
             logging_file.write(f"Weight matrix (L @ U):\n{self.policy.weight}\n")
             logging_file.write(f"Bias: {self.policy.bias}\n")
         else:
@@ -202,7 +205,7 @@ class LLMNumOptimAgent:
             assert len(results) == self.rank
             return np.array(results).reshape(-1)
         
-        def parse_lu_matrices(input_text):
+        def parse_factor_matrices(input_text):
             """Parse L and U matrices from LLM output."""
             lines = input_text.strip().split('\n')
             
@@ -211,7 +214,7 @@ class LLMNumOptimAgent:
             bias_vector = []
             
             current_section = None
-            expected_L_cols = self.lu_rank
+            expected_L_cols = self.factor_rank
             expected_U_cols = self.policy.dim_actions
             
             for line in lines:
@@ -257,34 +260,32 @@ class LLMNumOptimAgent:
             except ValueError as e:
                 print(f"ERROR creating L matrix: {e}")
                 print(f"L_matrix content: {L_matrix}")
-                return {'L': self.policy.L.copy(), 'U': self.policy.U_matrix.copy(), 'bias': self.policy.bias.copy()}
+                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             try:
                 U = np.array(U_matrix)
             except ValueError as e:
                 print(f"ERROR creating U matrix: {e}")
                 print(f"U_matrix content: {U_matrix}")
-                return {'L': self.policy.L.copy(), 'U': self.policy.U_matrix.copy(), 'bias': self.policy.bias.copy()}
+                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             bias = np.array(bias_vector).reshape(1, -1) if bias_vector else self.policy.bias
             
             print(f"Parsed L shape: {L.shape}, U shape: {U.shape}, bias shape: {bias.shape}")
             
             # Validate shapes
-            expected_L_shape = (self.policy.dim_states, self.lu_rank)
-            expected_U_shape = (self.lu_rank, self.policy.dim_actions)
+            expected_L_shape = (self.policy.dim_states, self.factor_rank)
+            expected_U_shape = (self.factor_rank, self.policy.dim_actions)
             
             if L.shape != expected_L_shape:
                 print(f"ERROR: L matrix has wrong shape {L.shape}, expected {expected_L_shape}")
                 print(f"LLM provided {len(L_matrix)} rows, expected {expected_L_shape[0]} rows with {expected_L_shape[1]} columns each")
-                # Return previous policy to continue training
-                return {'L': self.policy.L.copy(), 'U': self.policy.U_matrix.copy(), 'bias': self.policy.bias.copy()}
+                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             if U.shape != expected_U_shape:
                 print(f"ERROR: U matrix has wrong shape {U.shape}, expected {expected_U_shape}")
                 print(f"LLM provided {len(U_matrix)} rows, expected {expected_U_shape[0]} rows with {expected_U_shape[1]} columns each")
-                # Return previous policy to continue training
-                return {'L': self.policy.L.copy(), 'U': self.policy.U_matrix.copy(), 'bias': self.policy.bias.copy()}
+                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             print(f"✓ Shapes validated correctly")
             print(f"L matrix:\n{L}")
@@ -309,7 +310,7 @@ class LLMNumOptimAgent:
                 text += l
             return text
         
-        def str_lu_examples(replay_buffer: EpisodeRewardBufferNoBias):
+        def str_factor_examples(replay_buffer: EpisodeRewardBufferNoBias):
             """Format examples showing L, U matrices and rewards."""
             if len(replay_buffer.buffer) == 0:
                 return "(No previous attempts yet)\n"
@@ -325,10 +326,10 @@ class LLMNumOptimAgent:
                     text += f"Attempt #{idx}:\n"
                     text += "L matrix:\n"
                     for row in L:
-                        text += ", ".join([f"{x:.2g}" for x in row]) + "\n"
+                        text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
                     text += "U matrix:\n"
                     for row in U:
-                        text += ", ".join([f"{x:.2g}" for x in row]) + "\n"
+                        text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
                     text += f"f(params): {reward:.2f}\n\n"
                 else:
                     # Fallback to flat parameters
@@ -343,28 +344,28 @@ class LLMNumOptimAgent:
         # Update the policy using llm_brain, q_table and replay_buffer
         print("Updating the policy...")
         
-        if self.use_lu_factorization:
-            # Use LU factorization approach
-            new_lu_components, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
-                str_lu_examples(self.replay_buffer),
-                parse_lu_matrices,
+        if self.use_factorized_policy:
+            # Two-matrix policy: LLM generates L and U, policy = L @ U
+            new_factor_components, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                str_factor_examples(self.replay_buffer),
+                parse_factor_matrices,
                 self.training_episodes,
                 self.rank,
                 self.optimum,
                 self.search_step_size,
-                dim_state=self.policy.dim_states,  # Use policy's original dim_states
-                dim_action=self.policy.dim_actions,  # Use policy's original dim_actions
-                lu_rank=self.lu_rank,
-                use_lu=True
+                dim_state=self.policy.dim_states,
+                dim_action=self.policy.dim_actions,
+                factor_rank=self.factor_rank,
+                use_factorized=True
             )
             self.api_call_time += api_time
             
-            print(f"L shape: {new_lu_components['L'].shape}, U shape: {new_lu_components['U'].shape}")
-            self.policy.update_policy(lu_components=new_lu_components)
+            print(f"L shape: {new_factor_components['L'].shape}, U shape: {new_factor_components['U'].shape}")
+            self.policy.update_policy(factor_components=new_factor_components)
             print(f"Weight shape after update: {self.policy.weight.shape}")
             
-            # Store LU components for replay buffer
-            new_parameter_list = new_lu_components
+            # Store factor components for replay buffer
+            new_parameter_list = new_factor_components
         else:
             # Use regular parameter optimization
             new_parameter_list, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
@@ -482,8 +483,8 @@ class LLMNumOptimAgent:
         plt.close()
         print(f"Saved policy heatmap to {plot_filename}")
         
-        # If using LU factorization, also save L and U heatmaps (generated iteratively each episode)
-        if self.use_lu_factorization and hasattr(self.policy, 'L') and self.policy.L is not None:
+        # If using factorized policy, also save L and U heatmaps (generated iteratively each episode)
+        if self.use_factorized_policy and hasattr(self.policy, 'L') and self.policy.L is not None:
             fig, axes = plt.subplots(1, 3, figsize=(18, 5))
             
             # L matrix
@@ -496,12 +497,12 @@ class LLMNumOptimAgent:
                 cbar_kws={'label': 'Value'}
             )
             axes[0].set_title('L Matrix')
-            axes[0].set_xlabel('LU Rank Dimension')
+            axes[0].set_xlabel('Factor Rank Dimension')
             axes[0].set_ylabel('State Dimension')
             
             # U matrix
             sns.heatmap(
-                self.policy.U_matrix,
+                self.policy.U,
                 annot=True,
                 fmt='.2f',
                 cmap='viridis',
@@ -510,7 +511,7 @@ class LLMNumOptimAgent:
             )
             axes[1].set_title('U Matrix')
             axes[1].set_xlabel('Action Dimension')
-            axes[1].set_ylabel('LU Rank Dimension')
+            axes[1].set_ylabel('Factor Rank Dimension')
             
             # Reconstructed weight (L @ U)
             sns.heatmap(
@@ -521,17 +522,17 @@ class LLMNumOptimAgent:
                 ax=axes[2],
                 cbar_kws={'label': 'Value'}
             )
-            axes[2].set_title('Weight (L @ U)')
+            axes[2].set_title('Policy Weight (L @ U)')
             axes[2].set_xlabel('Action Dimension')
             axes[2].set_ylabel('State Dimension')
             
-            plt.suptitle(f'LU Factorization - Episode {self.training_episodes}', fontsize=16)
+            plt.suptitle(f'Factorized Policy Matrices - Episode {self.training_episodes}', fontsize=16)
             plt.tight_layout()
             
-            lu_plot_filename = f"{logdir}/policy_lu_heatmap_ep{self.training_episodes}.png"
-            plt.savefig(lu_plot_filename, dpi=150, bbox_inches='tight')
+            factor_plot_filename = f"{logdir}/policy_factor_heatmap_ep{self.training_episodes}.png"
+            plt.savefig(factor_plot_filename, dpi=150, bbox_inches='tight')
             plt.close()
-            print(f"Saved LU factorization heatmap to {lu_plot_filename}")
+            print(f"Saved factorized policy heatmap to {factor_plot_filename}")
     
     def create_heatmap_gifs(self, logdir, duration=500, loop=0):
         """
@@ -626,14 +627,14 @@ class LLMNumOptimAgent:
         print("\nCreating Policy Weight Heatmap GIF...")
         policy_gif = create_gif("policy_heatmap", "policy_heatmaps.gif")
         
-        # Create LU factorization heatmap GIF if using LU factorization
-        lu_gif = None
-        if self.use_lu_factorization:
-            print("\nCreating LU Factorization Heatmap GIF...")
-            lu_gif = create_gif("policy_lu_heatmap", "policy_lu_heatmaps.gif")
+        # Create factorized policy heatmap GIF if using factorized policy
+        factor_gif = None
+        if self.use_factorized_policy:
+            print("\nCreating Factorized Policy (L, U) Heatmap GIF...")
+            factor_gif = create_gif("policy_factor_heatmap", "policy_factor_heatmaps.gif")
         
         print("=" * 60)
-        return policy_gif, lu_gif
+        return policy_gif, factor_gif
 
     def evaluate_policy(self, world: BaseWorld, logdir):
         results = []

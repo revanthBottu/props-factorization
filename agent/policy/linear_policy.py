@@ -1,48 +1,31 @@
 import numpy as np
 from agent.policy.base_policy import Policy
-from scipy.linalg import svd
 
 
 class LinearPolicy(Policy):
-    def __init__(self, dim_states, dim_actions, svd_rank=None, use_svd=False, use_lu_factorization=False, lu_rank=None):
+    def __init__(self, dim_states, dim_actions, use_factorized_policy=False, factor_rank=None):
         super().__init__(dim_states, dim_actions)
 
         self.dim_states = dim_states
         self.dim_actions = dim_actions
-        self.use_svd = use_svd
-        self.use_lu_factorization = use_lu_factorization
-        
-        # Determine SVD rank (number of components to keep)
-        if use_svd:
-            if svd_rank is None:
-                # Default: use min(dim_states, dim_actions) // 2
-                self.svd_rank = max(1, min(dim_states, dim_actions) // 2)
-            else:
-                self.svd_rank = min(svd_rank, min(dim_states, dim_actions))
-        else:
-            self.svd_rank = None
+        self.use_factorized_policy = use_factorized_policy
 
-        # Determine LU rank (inner dimension for L @ U factorization)
-        if use_lu_factorization:
-            if lu_rank is None:
+        # Determine factor rank (inner dimension for L @ U = policy)
+        if use_factorized_policy:
+            if factor_rank is None:
                 # Default: use min(dim_states, dim_actions) // 2 for reduced representation
-                self.lu_rank = max(1, min(dim_states, dim_actions) // 2)
+                self.factor_rank = max(1, min(dim_states, dim_actions) // 2)
             else:
-                self.lu_rank = min(lu_rank, min(dim_states, dim_actions))
+                self.factor_rank = min(factor_rank, min(dim_states, dim_actions))
         else:
-            self.lu_rank = None
+            self.factor_rank = None
 
         self.weight = np.random.rand(self.dim_states, self.dim_actions)
         self.bias = np.random.rand(1, self.dim_actions)
-        
-        # SVD components: weight ≈ U @ S @ Vt
-        self.U = None  # shape: (dim_states, svd_rank)
-        self.S = None  # shape: (svd_rank,)
-        self.Vt = None  # shape: (svd_rank, dim_actions)
-        
-        # LU factorization components: weight = L @ U
-        self.L = None  # shape: (dim_states, lu_rank)
-        self.U_matrix = None  # shape: (lu_rank, dim_actions)
+
+        # Two-matrix factor components: policy = L @ U
+        self.L = None  # shape: (dim_states, factor_rank)
+        self.U = None  # shape: (factor_rank, dim_actions)
 
     def initialize_policy(self):
         # self.weight = np.round((np.random.rand(self.dim_states, self.dim_actions)) * 1, 1)
@@ -54,44 +37,19 @@ class LinearPolicy(Policy):
         # self.weight = np.round(np.random.uniform(-3., 3., size=(self.dim_states, self.dim_actions)), 1)
         # self.bias = np.round(np.random.uniform(-3., 3., size=(1, self.dim_actions)), 1)
         
-        # If using SVD, factorize the initial weight matrix
-        if self.use_svd:
-            self.factorize_weight()
-        
-        # If using LU factorization, initialize L and U randomly
-        if self.use_lu_factorization:
-            self.L = np.round(np.random.normal(0., 1., size=(self.dim_states, self.lu_rank)), 1)
-            self.U_matrix = np.round(np.random.normal(0., 1., size=(self.lu_rank, self.dim_actions)), 1)
-            self.reconstruct_weight_from_lu()
+        # If using factorized policy, initialize L and U randomly
+        if self.use_factorized_policy:
+            self.L = np.round(np.random.normal(0., 1., size=(self.dim_states, self.factor_rank)), 2)
+            self.U = np.round(np.random.normal(0., 1., size=(self.factor_rank, self.dim_actions)), 2)
+            self.reconstruct_weight_from_factors()
 
-    def factorize_weight(self):
-        """Perform truncated SVD on the weight matrix."""
-        if not self.use_svd:
+    def reconstruct_weight_from_factors(self):
+        """Reconstruct policy weight matrix from L and U: policy = L @ U."""
+        if not self.use_factorized_policy:
             return
         
-        # Perform SVD: weight = U @ S @ Vt
-        U_full, S_full, Vt_full = svd(self.weight, full_matrices=False)
-        
-        # Truncate to keep only top svd_rank components
-        self.U = np.round(U_full[:, :self.svd_rank], 2)
-        self.S = np.round(S_full[:self.svd_rank], 2)
-        self.Vt = np.round(Vt_full[:self.svd_rank, :], 2)
-    
-    def reconstruct_weight(self):
-        """Reconstruct weight matrix from SVD components."""
-        if not self.use_svd:
-            return
-        
-        # Reconstruct: weight = U @ diag(S) @ Vt
-        self.weight = np.round(self.U @ np.diag(self.S) @ self.Vt, 1)
-    
-    def reconstruct_weight_from_lu(self):
-        """Reconstruct weight matrix from L and U matrices."""
-        if not self.use_lu_factorization:
-            return
-        
-        # Reconstruct: weight = L @ U_matrix
-        self.weight = np.round(self.L @ self.U_matrix, 1)
+        # policy weight = L @ U (simple matrix multiplication)
+        self.weight = np.round(self.L @ self.U, 2)
     
     def get_action(self, state):
         state = state.T
@@ -103,37 +61,16 @@ class LinearPolicy(Policy):
         return np.matmul(state, self.weight) + self.bias
 
     def __str__(self):
-        if self.use_lu_factorization and self.L is not None:
-            # Show LU factorization form
-            output = "LU Factorization (weight = L @ U):\n\n"
+        if self.use_factorized_policy and self.L is not None:
+            # Show factorized form: policy = L @ U
+            output = "Factorized Policy (weight = L @ U):\n\n"
             output += "L matrix:\n"
             for row in self.L:
                 output += ", ".join([str(i) for i in row])
                 output += "\n"
             
             output += "\nU matrix:\n"
-            for row in self.U_matrix:
-                output += ", ".join([str(i) for i in row])
-                output += "\n"
-            
-            output += "\nBias:\n"
-            for b in self.bias:
-                output += ", ".join([str(i) for i in b])
-                output += "\n"
-        elif self.use_svd and self.U is not None:
-            # Show factorized form for SVD
-            output = "SVD Factorization (weight = U @ S @ Vt):\n\n"
-            output += "U matrix:\n"
             for row in self.U:
-                output += ", ".join([str(i) for i in row])
-                output += "\n"
-            
-            output += "\nS vector (singular values):\n"
-            output += ", ".join([str(i) for i in self.S])
-            output += "\n"
-            
-            output += "\nVt matrix:\n"
-            for row in self.Vt:
                 output += ", ".join([str(i) for i in row])
                 output += "\n"
             
@@ -155,54 +92,32 @@ class LinearPolicy(Policy):
 
         return output
 
-    def update_policy(self, weight_and_bias_list=None, svd_components=None, lu_components=None):
-        """Update policy with either full parameters, SVD components, or LU components."""
-        if self.use_lu_factorization and lu_components is not None:
-            # Update with LU components: (L, U, bias)
-            self.L = lu_components['L']
-            self.U_matrix = lu_components['U']
-            self.bias = lu_components['bias']
-            # Reconstruct weight matrix from L @ U
-            self.reconstruct_weight_from_lu()
-        elif self.use_svd and svd_components is not None:
-            # Update with SVD components: (U, S, Vt, bias)
-            self.U = svd_components['U']
-            self.S = svd_components['S']
-            self.Vt = svd_components['Vt']
-            self.bias = svd_components['bias']
-            # Reconstruct weight matrix
-            self.reconstruct_weight()
+    def update_policy(self, weight_and_bias_list=None, factor_components=None):
+        """Update policy with either full parameters or L/U factor components."""
+        if self.use_factorized_policy and factor_components is not None:
+            # Update L, U, bias and reconstruct policy weight = L @ U
+            self.L = factor_components['L']
+            self.U = factor_components['U']
+            self.bias = factor_components['bias']
+            self.reconstruct_weight_from_factors()
         elif weight_and_bias_list is not None:
             weight_and_bias_list = np.array(weight_and_bias_list).reshape(self.dim_states + 1, self.dim_actions)
             self.weight = np.array(weight_and_bias_list[:-1])
             self.bias = np.expand_dims(np.array(weight_and_bias_list[-1]), axis=0)
-            # If using SVD, factorize the new weight
-            if self.use_svd:
-                self.factorize_weight()
+
     
-    def get_parameters(self, return_svd=None, return_lu=None):
+    def get_parameters(self, return_factors=None):
         """Return parameters in full or factorized form."""
-        if return_lu is None:
-            return_lu = self.use_lu_factorization
-        if return_svd is None:
-            return_svd = self.use_svd
-        
-        if return_lu and self.L is not None:
-            # Return LU components
+        if return_factors is None:
+            return_factors = self.use_factorized_policy
+
+        if return_factors and self.L is not None:
+            # Return L, U factor components
             return {
                 'L': self.L,
-                'U': self.U_matrix,
-                'bias': self.bias,
-                'lu_rank': self.lu_rank
-            }
-        elif return_svd and self.U is not None:
-            # Return SVD components flattened
-            return {
                 'U': self.U,
-                'S': self.S,
-                'Vt': self.Vt,
                 'bias': self.bias,
-                'svd_rank': self.svd_rank
+                'factor_rank': self.factor_rank
             }
         else:
             # Return full parameters

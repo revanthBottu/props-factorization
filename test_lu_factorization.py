@@ -1,8 +1,8 @@
 """
-Test script to verify LU factorization functionality and visualization.
+Test script to verify factorized policy functionality and visualization.
 
 This demonstrates how the LLM generates L and U matrices that are
-multiplied together to form the policy weight matrix, and shows the
+multiplied together (policy = L @ U) to form the policy weight matrix, and shows the
 visualization capabilities for tracking progress.
 """
 
@@ -13,42 +13,42 @@ import os
 from agent.policy.linear_policy import LinearPolicy
 
 def test_lu_factorization():
-    """Test LU factorization in LinearPolicy."""
+    """Test factorized policy (L @ U) in LinearPolicy."""
     
-    # Create a policy with LU factorization enabled
+    # Create a policy with factorized representation
     dim_states = 4
     dim_actions = 2
-    lu_rank = 2  # Reduced rank for factorization
+    factor_rank = 2  # Inner dimension for L @ U
     
     policy = LinearPolicy(
         dim_states=dim_states,
         dim_actions=dim_actions,
-        use_lu_factorization=True,
-        lu_rank=lu_rank
+        use_factorized_policy=True,
+        factor_rank=factor_rank
     )
     
     # Initialize the policy
     policy.initialize_policy()
     
     print("=" * 60)
-    print("Testing LU Factorization in LinearPolicy")
+    print("Testing Factorized Policy (L @ U) in LinearPolicy")
     print("=" * 60)
     print(f"\nPolicy dimensions:")
     print(f"  States: {dim_states}")
     print(f"  Actions: {dim_actions}")
-    print(f"  LU Rank: {lu_rank}")
+    print(f"  Factor Rank: {factor_rank}")
     
     print(f"\nL matrix shape: {policy.L.shape}")
     print(f"L matrix:\n{policy.L}")
     
-    print(f"\nU matrix shape: {policy.U_matrix.shape}")
-    print(f"U matrix:\n{policy.U_matrix}")
+    print(f"\nU matrix shape: {policy.U.shape}")
+    print(f"U matrix:\n{policy.U}")
     
-    print(f"\nReconstructed weight matrix (L @ U) shape: {policy.weight.shape}")
+    print(f"\nPolicy weight matrix (L @ U) shape: {policy.weight.shape}")
     print(f"Weight matrix:\n{policy.weight}")
     
     # Verify that weight = L @ U
-    manual_reconstruction = policy.L @ policy.U_matrix
+    manual_reconstruction = policy.L @ policy.U
     print(f"\nManual reconstruction check:")
     print(f"Max difference: {np.max(np.abs(manual_reconstruction - policy.weight))}")
     
@@ -64,13 +64,13 @@ def test_lu_factorization():
     print(f"\nNew L matrix:\n{new_L}")
     print(f"\nNew U matrix:\n{new_U}")
     
-    lu_components = {
+    factor_components = {
         'L': new_L,
         'U': new_U,
         'bias': new_bias
     }
     
-    policy.update_policy(lu_components=lu_components)
+    policy.update_policy(factor_components=factor_components)
     
     print(f"\nUpdated weight matrix (L @ U):\n{policy.weight}")
     print(f"Updated bias:\n{policy.bias}")
@@ -82,7 +82,7 @@ def test_lu_factorization():
     
     # Test get_parameters
     print("\n" + "=" * 60)
-    print("Testing get_parameters with LU mode")
+    print("Testing get_parameters with factorized mode")
     print("=" * 60)
     
     params = policy.get_parameters()
@@ -107,16 +107,16 @@ def test_visualization():
     test_dir = "test_visualizations"
     os.makedirs(test_dir, exist_ok=True)
     
-    # Create a policy with LU factorization
+    # Create a policy with factorized representation
     dim_states = 4
     dim_actions = 2
-    lu_rank = 2
+    factor_rank = 2
     
     policy = LinearPolicy(
         dim_states=dim_states,
         dim_actions=dim_actions,
-        use_lu_factorization=True,
-        lu_rank=lu_rank
+        use_factorized_policy=True,
+        factor_rank=factor_rank
     )
     policy.initialize_policy()
     
@@ -158,8 +158,8 @@ def test_visualization():
     plt.close()
     print(f"   Saved to {weight_plot_file}")
     
-    # Test 3: LU factorization heatmap
-    print("\n3. Creating LU factorization heatmap...")
+    # Test 3: Factorized policy heatmap
+    print("\n3. Creating factorized policy (L, U) heatmap...")
     fig, axes = plt.subplots(1, 3, figsize=(18, 5))
     
     # L matrix
@@ -172,12 +172,12 @@ def test_visualization():
         cbar_kws={'label': 'Value'}
     )
     axes[0].set_title('L Matrix')
-    axes[0].set_xlabel('LU Rank Dimension')
+    axes[0].set_xlabel('Factor Rank Dimension')
     axes[0].set_ylabel('State Dimension')
     
     # U matrix
     sns.heatmap(
-        policy.U_matrix,
+        policy.U,
         annot=True,
         fmt='.2f',
         cmap='viridis',
@@ -186,9 +186,9 @@ def test_visualization():
     )
     axes[1].set_title('U Matrix')
     axes[1].set_xlabel('Action Dimension')
-    axes[1].set_ylabel('LU Rank Dimension')
+    axes[1].set_ylabel('Factor Rank Dimension')
     
-    # Reconstructed weight (L @ U)
+    # Policy weight (L @ U)
     sns.heatmap(
         policy.weight,
         annot=True,
@@ -197,17 +197,17 @@ def test_visualization():
         ax=axes[2],
         cbar_kws={'label': 'Value'}
     )
-    axes[2].set_title('Weight (L @ U)')
+    axes[2].set_title('Policy Weight (L @ U)')
     axes[2].set_xlabel('Action Dimension')
     axes[2].set_ylabel('State Dimension')
     
-    plt.suptitle('LU Factorization', fontsize=16)
+    plt.suptitle('Factorized Policy Matrices', fontsize=16)
     plt.tight_layout()
     
-    lu_plot_file = f"{test_dir}/test_lu_factorization_heatmap.png"
-    plt.savefig(lu_plot_file, dpi=150, bbox_inches='tight')
+    factor_plot_file = f"{test_dir}/test_factorized_policy_heatmap.png"
+    plt.savefig(factor_plot_file, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"   Saved to {lu_plot_file}")
+    print(f"   Saved to {factor_plot_file}")
     
     print("\n" + "=" * 60)
     print("Visualization test completed!")

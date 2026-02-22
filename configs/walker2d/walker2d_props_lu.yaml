@@ -1,10 +1,10 @@
 task: cont_space_llm_num_optim
-num_episodes: 395
-gym_env_name: Hopper-v5
+num_episodes: 400
+gym_env_name: Walker2d-v5
 render_mode: null
-logdir: logs/hopper_lu
-dim_actions: 3
-dim_states: 11
+logdir: logs/walker2d_props
+dim_actions: 6
+dim_states: 17
 max_traj_count: 1000
 max_traj_length: 1000
 template_dir: agent/policy/templates
@@ -12,10 +12,10 @@ llm_si_template_name: num_optim_lu.j2
 llm_output_conversion_template_name: num_optim.j2
 llm_model_name: gemini-2.5-flash-lite
 num_evaluation_episodes: 20
-warmup_episodes: 100
+warmup_episodes: 20
 warmup_dir: null
 bias: true
-optimum: 1000
+optimum: 7000
 search_step_size: 0.1
-use_lu_factorization: true
-lu_rank: 4  # Inner dimension for L @ U (11 states, 3 actions, so 4 is reasonable)
+use_factorized_policy: true
+factor_rank: 3

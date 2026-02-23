@@ -26,6 +26,8 @@ class LLMNumOptimRndmPrjAgent:
     ):
         self.start_time = time.process_time()
         self.api_call_time = 0
+        self.total_steps = 0
+        self.total_episodes = 0
         self.dim_action = dim_action
         self.dim_state = dim_state
         self.bias = bias
@@ -81,7 +83,9 @@ class LLMNumOptimRndmPrjAgent:
             logging_file.write(f"{state.T[0]} | {action[0]} | {reward}\n")
             state = next_state
             step_idx += 1
+            self.total_steps += 1
         logging_file.write(f"Total reward: {world.get_accu_reward()}\n")
+        self.total_episodes += 1
         if record:
             self.replay_buffer.add(
                 self.parameters_high_to_low(self.policy.get_parameters()), world.get_accu_reward()
@@ -175,9 +179,21 @@ class LLMNumOptimRndmPrjAgent:
             results.append(result)
         print(f"Results: {results}")
         result = np.mean(results)
+        variance = np.var(results)
+        std = np.std(results)
+        print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
         self.replay_buffer.add(new_parameter_list, result)
 
         self.training_episodes += 1
+
+        _cpu_time = time.process_time() - self.start_time
+        _api_time = self.api_call_time
+        _total_episodes = self.total_episodes
+        _total_steps = self.total_steps
+        _total_reward = result
+        _variance = variance
+        _std = std
+        return _cpu_time, _api_time, _total_episodes, _total_steps, _total_reward, _variance, _std
 
     def evaluate_policy(self, world: BaseWorld, logdir):
         results = []

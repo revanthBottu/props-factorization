@@ -167,6 +167,9 @@ class LLMNumOptimQTableSemanticsAgent:
             results.append(result)
         print(f"Results: {results}")
         result = np.mean(results)
+        variance = np.var(results)
+        std = np.std(results)
+        print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
         self.replay_buffer.add(
             np.array(
                 [self.q_table.mapping[i] for i in range(len(self.q_table.mapping))]
@@ -181,7 +184,9 @@ class LLMNumOptimQTableSemanticsAgent:
         _total_episodes = self.total_episodes
         _total_steps = self.total_steps
         _total_reward = result
-        return _cpu_time, _api_time, _total_episodes, _total_steps, _total_reward
+        _variance = variance
+        _std = std
+        return _cpu_time, _api_time, _total_episodes, _total_steps, _total_reward, _variance, _std
     
     def evaluate_policy(self, world: BaseWorld, logdir):
         results = []

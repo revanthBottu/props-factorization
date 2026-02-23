@@ -116,7 +116,7 @@ def run_training_loop(
         agent.replay_buffer.load(warmup_dir)
     
     overall_log_file = open(f"{logdir}/overall_log.txt", "w")
-    overall_log_file.write("Iteration, CPU Time, API Time, Total Episodes, Total Steps, Total Reward\n")
+    overall_log_file.write("Iteration, CPU Time, API Time, Total Episodes, Total Steps, Total Reward, Variance, Std\n")
     overall_log_file.flush()
     for episode in range(num_episodes):
         print(f"Episode: {episode}")
@@ -127,8 +127,8 @@ def run_training_loop(
         
         for trial_idx in range(5):
             try:
-                cpu_time, api_time, total_episodes, total_steps, total_reward = agent.train_policy(world, curr_episode_dir)
-                overall_log_file.write(f"{episode + 1}, {cpu_time}, {api_time}, {total_episodes}, {total_steps}, {total_reward}\n")
+                cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std = agent.train_policy(world, curr_episode_dir)
+                overall_log_file.write(f"{episode + 1}, {cpu_time}, {api_time}, {total_episodes}, {total_steps}, {total_reward}, {variance}, {std}\n")
                 overall_log_file.flush()
                 print(f"{trial_idx + 1}th trial attempt succeeded in training")
                 break

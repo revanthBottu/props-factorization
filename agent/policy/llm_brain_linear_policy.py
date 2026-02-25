@@ -1,5 +1,6 @@
 import gymnasium as gym
 import random
+import re
 import numpy as np
 import os
 import time
@@ -12,7 +13,7 @@ import time
 import torch
 
 try:
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
     HUGGINGFACE_AVAILABLE = True
 except ImportError:
     HUGGINGFACE_AVAILABLE = False
@@ -81,48 +82,55 @@ class LLMBrain:
             # Load tokenizer
             self.hf_tokenizer = AutoTokenizer.from_pretrained(llm_model_name)
             
-            # Detect if model is pre-quantized (FP8, GPTQ, AWQ, Mxfp4, or gpt-oss)
-            # gpt-oss uses Mxfp4 quantization
-            is_prequantized = any(x in llm_model_name.lower() for x in ['fp8', 'gptq', 'awq', 'int4', 'int8', 'gpt-oss', '-oss'])
+            # Inspect the model config to determine whether the model is already
+            # quantized.  This is more reliable than guessing from the model name.
+            print("Inspecting model config for existing quantization...")
+            model_config = AutoConfig.from_pretrained(llm_model_name, trust_remote_code=True)
             
+            # A quantized model will have a populated quantization_config in its
+            # config.  GPTQ / AWQ / FP8 / Mxfp4 models all set this field.
+            config_quant = getattr(model_config, "quantization_config", None)
+            is_prequantized = config_quant is not None
+
+            # Also catch models whose names signal quantization but whose config
+            # may not yet be saved correctly (older checkpoints).
+            name_quant_signals = ['fp8', 'gptq', 'awq', 'int4', 'int8', 'gpt-oss', '-oss', 'mxfp4']
+            if not is_prequantized and any(x in llm_model_name.lower() for x in name_quant_signals):
+                print("Warning: quantization not detected in config but model name suggests "
+                      "it is pre-quantized. Loading without additional quantization.")
+                is_prequantized = True
+
             if is_prequantized:
-                print(f"Detected pre-quantized model (Mxfp4/other), loading without additional quantization")
-                print(f"Enabling CPU offloading: 60GB GPU + 350GB RAM available")
-                # Load pre-quantized model with CPU offloading
+                quant_type = getattr(config_quant, "quant_type", None) or \
+                             getattr(config_quant, "bits", None) or "unknown"
+                print(f"Pre-quantized model detected (type: {quant_type}). "
+                      "Loading without additional quantization.")
                 self.hf_model = AutoModelForCausalLM.from_pretrained(
                     llm_model_name,
-                    device_map="auto",
+                    device_map="cuda",
                     trust_remote_code=True,
-                    dtype="auto",
-                    low_cpu_mem_usage=True,
-                    max_memory={0: "60GiB", "cpu": "350GiB"},  # Reduced GPU to leave room for generation
-                    offload_folder="offload",
-                    offload_state_dict=True
+                    torch_dtype="auto",
                 )
-                print("Successfully loaded pre-quantized model with CPU offloading enabled")
+                print("Successfully loaded pre-quantized model onto GPU")
             else:
-                print(f"Loading model with 4-bit quantization (required for 120B+ models)")
-                print(f"Enabling CPU offloading: 60GB GPU + 350GB RAM available")
-                # Configure 4-bit quantization for large models
+                # Apply NF4 4-bit quantization — best quality/VRAM tradeoff for
+                # inference.  Double-quant further reduces the quantization
+                # constants' footprint (~0.4 bits/param saved) without a
+                # measurable quality drop for this text-generation task.
+                print("No existing quantization detected. Applying NF4 4-bit quantization.")
                 quantization_config = BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_compute_dtype=torch.bfloat16,
                     bnb_4bit_use_double_quant=True,
-                    bnb_4bit_quant_type="nf4"
+                    bnb_4bit_quant_type="nf4",
                 )
-                
-                # Load model with quantization and CPU offloading
                 self.hf_model = AutoModelForCausalLM.from_pretrained(
                     llm_model_name,
                     quantization_config=quantization_config,
-                    device_map="auto",
-                    dtype=torch.bfloat16,
+                    device_map="cuda",
                     trust_remote_code=True,
-                    low_cpu_mem_usage=True,
-                    max_memory={0: "60GiB", "cpu": "350GiB"},
-                    offload_folder="offload"
                 )
-                print("Successfully loaded with 4-bit quantization and CPU offloading")
+                print("Successfully loaded with NF4 4-bit quantization")
             
             # Remove unsupported generation parameters to avoid warnings
             if hasattr(self.hf_model, 'generation_config'):
@@ -133,8 +141,8 @@ class LLMBrain:
             if self.hf_tokenizer.pad_token is None:
                 self.hf_tokenizer.pad_token = self.hf_tokenizer.eos_token
             
-            quant_status = "pre-quantized" if is_prequantized else "4-bit quantization"
-            print(f"Successfully loaded HuggingFace model with {quant_status}")
+            quant_status = "pre-quantized (passthrough)" if is_prequantized else "NF4 4-bit quantization applied"
+            print(f"HuggingFace model ready — {quant_status}")
             
             # Track if model is on CUDA
             self.use_cuda = torch.cuda.is_available() and next(self.hf_model.parameters()).is_cuda
@@ -206,6 +214,100 @@ class LLMBrain:
         prompt += "<|assistant|>\n"
         return prompt
 
+    def _normalize_local_response(self, response: str) -> str:
+        """Post-process raw output from local models (HuggingFace / Ollama).
+        """
+        # 1. Strip <tool_call>...<tool_call> blocks
+        response = re.sub(r"<tool_call>.*?<tool_call>", "", response, flags=re.DOTALL).strip()
+
+        # 2. Strip markdown code fences (```python\n...``` or ```\n...```)
+        response = re.sub(r"```[^\n]*\n?", "", response).strip()
+
+        # 3. For the flat params format, pull the `params[0]:` line to the top
+        #    so parse_parameters (which only reads split('\n')[0]) finds it.
+        lines = response.split("\n")
+        params_line_idx = next(
+            (i for i, ln in enumerate(lines)
+             if re.search(r"params\s*\[\s*0\s*\]\s*:", ln, re.IGNORECASE)),
+            None,
+        )
+        if params_line_idx is not None and params_line_idx > 0:
+            lines = (
+                [lines[params_line_idx]]
+                + lines[:params_line_idx]
+                + lines[params_line_idx + 1:]
+            )
+
+        # 4. For the L/U matrix format, parse_factor_matrices scans all lines
+        #    for 'L matrix:' / 'U matrix:' headers, so no reordering is needed.
+
+        return "\n".join(lines)
+
+    def _generate_with_hf(self, max_new_tokens=384, temperature=0.7, do_sample=True):
+        """Generate a response from the loaded HuggingFace model.
+
+        Automatically recovers from VRAM OOM by halving max_new_tokens and
+        retrying until the budget drops below 64 tokens, at which point a
+        RuntimeError is raised so callers can surface the problem clearly.
+        """
+        prompt = self._format_hf_chat()
+        current_max_tokens = max_new_tokens
+        min_tokens = 64
+
+        while current_max_tokens >= min_tokens:
+            inputs = None
+            try:
+                inputs = self.hf_tokenizer(
+                    prompt, return_tensors="pt", padding=True
+                ).to(self.hf_model.device)
+
+                gen_kwargs = dict(
+                    max_new_tokens=current_max_tokens,
+                    do_sample=do_sample,
+                    pad_token_id=self.hf_tokenizer.pad_token_id,
+                    use_cache=True,
+                )
+                if do_sample:
+                    gen_kwargs["temperature"] = temperature
+
+                with torch.no_grad():
+                    outputs = self.hf_model.generate(**inputs, **gen_kwargs)
+
+                response = self.hf_tokenizer.decode(
+                    outputs[0][inputs["input_ids"].shape[1]:],
+                    skip_special_tokens=True,
+                )
+                del inputs, outputs
+                if self.use_cuda:
+                    torch.cuda.empty_cache()
+                return response
+
+            except Exception as e:
+                if inputs is not None:
+                    del inputs
+                if self.use_cuda:
+                    torch.cuda.empty_cache()
+
+                is_oom = "out of memory" in str(e).lower() or (
+                    hasattr(torch.cuda, "OutOfMemoryError")
+                    and isinstance(e, torch.cuda.OutOfMemoryError)
+                )
+                if is_oom:
+                    current_max_tokens //= 2
+                    if current_max_tokens < min_tokens:
+                        raise RuntimeError(
+                            f"[OOM] VRAM exhausted even at {min_tokens} max_new_tokens. "
+                            "Free up VRAM, reduce input length, or use a smaller model."
+                        ) from e
+                    print(
+                        f"[OOM] VRAM exhausted. Retrying with "
+                        f"max_new_tokens={current_max_tokens}..."
+                    )
+                else:
+                    raise
+
+        raise RuntimeError("[OOM] Could not generate a response within VRAM constraints.")
+
     def reset_llm_conversation(self):
         self.llm_conversation = []
 
@@ -257,37 +359,14 @@ class LLMBrain:
                     )
                     response = response.text
                 elif self.model_group == "huggingface":
-                    # Use HuggingFace transformers
-                    # Format conversation for chat template
-                    prompt = self._format_hf_chat()
-                    
-                    # Tokenize and generate
-                    inputs = self.hf_tokenizer(prompt, return_tensors="pt", padding=True).to(self.hf_model.device)
-                    
-                    with torch.no_grad():
-                        outputs = self.hf_model.generate(
-                            **inputs,
-                            max_new_tokens=384,  # Reduced for memory - still enough for LU matrices
-                            do_sample=True,
-                            temperature=0.7,
-                            pad_token_id=self.hf_tokenizer.pad_token_id,
-                            use_cache=True
-                        )
-                    
-                    # Decode only the new tokens
-                    response = self.hf_tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-                    
-                    # Immediate memory cleanup to prevent OOM
-                    del inputs, outputs
-                    if self.use_cuda:
-                        torch.cuda.empty_cache()
+                    response = self._normalize_local_response(self._generate_with_hf())
                 elif self.model_group == "ollama":
                     # Use Ollama for local models
                     response = self.ollama_client.chat(
                         model=self.llm_model_name,
                         messages=self.llm_conversation
                     )
-                    response = response['message']['content']
+                    response = self._normalize_local_response(response['message']['content'])
             except Exception as e:
                 print(f"Error: {e}")
                 
@@ -352,28 +431,16 @@ class LLMBrain:
                         )
                         responses.append(response.text)
                 elif self.model_group == "huggingface":
-                    # Generate multiple responses with HuggingFace
+                    # Generate multiple responses sequentially with OOM recovery
                     responses = []
-                    prompt = self._format_hf_chat()
-                    inputs = self.hf_tokenizer(prompt, return_tensors="pt", padding=True).to(self.hf_model.device)
-                    
                     for _ in range(num_responses):
-                        with torch.no_grad():
-                            outputs = self.hf_model.generate(
-                                **inputs,
-                                max_new_tokens=384,  # Reduced for memory
-                                do_sample=True,
-                                temperature=temperature,
-                                pad_token_id=self.hf_tokenizer.pad_token_id,
-                                use_cache=True
+                        responses.append(
+                            self._normalize_local_response(
+                                self._generate_with_hf(
+                                    temperature=temperature, do_sample=True
+                                )
                             )
-                        response = self.hf_tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-                        responses.append(response)
-                        
-                        # Clean up after each response
-                        del outputs
-                        if self.use_cuda:
-                            torch.cuda.empty_cache()
+                        )
                 elif self.model_group == "ollama":
                     # Generate multiple responses with Ollama
                     responses = []
@@ -383,7 +450,9 @@ class LLMBrain:
                             messages=self.llm_conversation,
                             options={"temperature": temperature}
                         )
-                        responses.append(response['message']['content'])
+                        responses.append(
+                            self._normalize_local_response(response['message']['content'])
+                        )
 
             except Exception as e:
                 print(f"Error: {e}")

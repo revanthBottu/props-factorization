@@ -166,10 +166,15 @@ class LLMNumOptimQTableSemanticsAgent:
                 result = self.rollout_episode(world, logging_file, record=False)
             results.append(result)
         print(f"Results: {results}")
-        result = np.mean(results)
-        variance = np.var(results)
-        std = np.std(results)
-        print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
+        # Trim 3 highest and 3 lowest rollouts before computing statistics
+        if len(results) > 6:
+            trimmed_results = sorted(results)[3:-3]
+        else:
+            trimmed_results = results
+        result = np.mean(trimmed_results)
+        variance = np.var(trimmed_results)
+        std = np.std(trimmed_results)
+        print(f"Trimmed Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
         self.replay_buffer.add(
             np.array(
                 [self.q_table.mapping[i] for i in range(len(self.q_table.mapping))]

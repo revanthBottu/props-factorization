@@ -8,6 +8,12 @@ import re
 import time
 from agent.policy.replay_buffer import ReplayBuffer
 from agent.policy.replay_buffer import QTableRewardTrajBuffer
+import random
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except Exception:
+    TORCH_AVAILABLE = False
 
 
 class LLMNumOptimQTableSemanticsAgent:
@@ -25,6 +31,7 @@ class LLMNumOptimQTableSemanticsAgent:
         optimum,
         env_kwargs=None,
         env_desc_file=None,
+        seed: int = None,
     ):
         self.start_time = time.process_time()
         self.api_call_time = 0
@@ -35,6 +42,7 @@ class LLMNumOptimQTableSemanticsAgent:
         self.optimum = optimum
         self.env_kwargs = env_kwargs
         self.env_desc_file = env_desc_file
+        self.seed = seed if seed is not None else 42
 
         self.q_table = QTable(actions=actions, states=states)
         self.replay_buffer = EpisodeRewardBufferNoBias(max_size=max_traj_count)
@@ -48,7 +56,17 @@ class LLMNumOptimQTableSemanticsAgent:
         self.rank = len(self.q_table.mapping)
 
     def rollout_episode(self, world: BaseWorld, logging_file, record=True):
-        state = world.reset()
+        # deterministic seed per episode
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        if TORCH_AVAILABLE:
+            try:
+                torch.manual_seed(self.seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(self.seed)
+            except Exception:
+                pass
+        state = world.reset(seed=self.seed)
         logging_file.write(f"state | action | reward\n")
         done = False
         step_idx = 0

@@ -7,6 +7,12 @@ from world.base_world import BaseWorld
 import numpy as np
 import re
 import time
+import random
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except Exception:
+    TORCH_AVAILABLE = False
 
 
 class LLMNumOptimSemanticAgent:
@@ -25,6 +31,7 @@ class LLMNumOptimSemanticAgent:
         optimum,
         search_step_size,
         env_desc_file=None,
+        seed: int = None,
     ):
         self.start_time = time.process_time()
         self.api_call_time = 0
@@ -36,6 +43,7 @@ class LLMNumOptimSemanticAgent:
         self.optimum = optimum
         self.search_step_size = search_step_size
         self.env_desc_file = env_desc_file
+        self.seed = seed if seed is not None else 42
 
         if not self.bias:
             param_count = dim_action * dim_state
@@ -62,7 +70,17 @@ class LLMNumOptimSemanticAgent:
             self.dim_state += 1
 
     def rollout_episode(self, world: BaseWorld, logging_file, record=True):
-        state = world.reset()
+        # deterministic seed per episode
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        if TORCH_AVAILABLE:
+            try:
+                torch.manual_seed(self.seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(self.seed)
+            except Exception:
+                pass
+        state = world.reset(seed=self.seed)
         state = np.expand_dims(state, axis=0)
         logging_file.write(
             f"{', '.join([str(x) for x in self.policy.get_parameters().reshape(-1)])}\n"

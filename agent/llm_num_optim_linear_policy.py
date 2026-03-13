@@ -3,6 +3,12 @@ from agent.policy.linear_policy import LinearPolicy
 from agent.policy.replay_buffer import EpisodeRewardBufferNoBias
 from agent.policy.llm_brain_linear_policy import LLMBrain
 from world.base_world import BaseWorld
+import random
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except Exception:
+    TORCH_AVAILABLE = False
 import numpy as np
 import re
 import time
@@ -37,6 +43,8 @@ class LLMNumOptimAgent:
         search_step_size,
         use_factorized_policy=False,
         factor_rank=None,
+        frozen_factor=None,
+        seed: int = None,
     ):
         self.start_time = time.process_time()
         self.api_call_time = 0
@@ -48,6 +56,11 @@ class LLMNumOptimAgent:
         self.optimum = optimum
         self.search_step_size = search_step_size
         self.use_factorized_policy = use_factorized_policy
+        # Which factor to keep frozen: 'L', 'U', or None (both updated)
+        assert frozen_factor in (None, 'L', 'U'), f"frozen_factor must be None, 'L', or 'U', got: {frozen_factor!r}"
+        self.frozen_factor = frozen_factor
+        # Deterministic seed for episode rollouts. If None, default to 42.
+        self.seed = seed if seed is not None else 42
 
         if not self.bias:
             param_count = dim_action * dim_state
@@ -56,6 +69,7 @@ class LLMNumOptimAgent:
         self.rank = param_count
         
         # Setup factor rank for two-matrix policy representation
+        print(f"[DEBUG] use_factorized_policy={use_factorized_policy}, factor_rank={factor_rank}, dim_state={dim_state}, dim_action={dim_action}")
         if use_factorized_policy:
             if factor_rank is None:
                 self.factor_rank = max(1, min(dim_state, dim_action) // 2)
@@ -63,6 +77,7 @@ class LLMNumOptimAgent:
                 self.factor_rank = factor_rank
         else:
             self.factor_rank = None
+        print(f"[DEBUG] self.factor_rank set to {self.factor_rank}")
 
         if not self.bias:
             self.policy = LinearPolicyNoBias(
@@ -94,7 +109,9 @@ class LLMNumOptimAgent:
             self.dim_state += 1
 
     def rollout_episode(self, world: BaseWorld, logging_file, record=True):
-        state = world.reset()
+        # Ensure deterministic behavior for this episode
+        self._set_global_seed(self.seed)
+        state = world.reset(seed=self.seed)
         state = np.expand_dims(state, axis=0)
         
         # Get parameters for logging
@@ -147,7 +164,14 @@ class LLMNumOptimAgent:
             )
             
             # Run one episode with the current policy
-            state, _ = env.reset()
+            # Seed the recording environment for deterministic playback
+            if hasattr(env, 'reset'):
+                try:
+                    state, _ = env.reset(seed=self.seed)
+                except TypeError:
+                    state, _ = env.reset()
+            else:
+                state, _ = env.reset()
             state = np.expand_dims(state, axis=0)
             done = False
             total_reward = 0
@@ -169,6 +193,24 @@ class LLMNumOptimAgent:
             
         except Exception as e:
             print(f"Warning: Could not record video: {e}")
+
+    def _set_global_seed(self, seed: int):
+        """Set seeds for Python, NumPy, Torch (if available)."""
+        try:
+            random.seed(seed)
+        except Exception:
+            pass
+        try:
+            np.random.seed(seed)
+        except Exception:
+            pass
+        if TORCH_AVAILABLE:
+            try:
+                torch.manual_seed(seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(seed)
+            except Exception:
+                pass
 
     def random_warmup(self, world: BaseWorld, logdir, num_episodes):
         for episode in range(num_episodes):
@@ -206,7 +248,12 @@ class LLMNumOptimAgent:
             return np.array(results).reshape(-1)
         
         def parse_factor_matrices(input_text):
-            """Parse L and U matrices from LLM output."""
+            """Parse L and/or U matrices from LLM output.
+            
+            When self.frozen_factor == 'L', only U (and bias) are parsed; L is kept fixed.
+            When self.frozen_factor == 'U', only L (and bias) are parsed; U is kept fixed.
+            When self.frozen_factor is None, both L and U are parsed.
+            """
             lines = input_text.strip().split('\n')
             
             L_matrix = []
@@ -240,56 +287,70 @@ class LLMNumOptimAgent:
                         
                         # Validate row length before adding
                         if current_section == 'L':
-                            if len(row) == expected_L_cols:
+                            if self.frozen_factor == 'L':
+                                pass  # Skip – L is frozen; LLM may still include it for reference
+                            elif len(row) == expected_L_cols:
                                 L_matrix.append(row)
                             else:
                                 print(f"Warning: Skipping L row with {len(row)} values (expected {expected_L_cols}): {row}")
                         elif current_section == 'U':
-                            if len(row) == expected_U_cols:
+                            if self.frozen_factor == 'U':
+                                pass  # Skip – U is frozen
+                            elif len(row) == expected_U_cols:
                                 U_matrix.append(row)
                             else:
                                 print(f"Warning: Skipping U row with {len(row)} values (expected {expected_U_cols}): {row}")
                         elif current_section == 'bias':
                             bias_vector.extend(row)
             
-            print(f"Parsed {len(L_matrix)} L rows, {len(U_matrix)} U rows")
+            print(f"Parsed {len(L_matrix)} L rows, {len(U_matrix)} U rows (frozen_factor={self.frozen_factor!r})")
             
-            # Convert to numpy arrays with validation
-            try:
-                L = np.array(L_matrix)
-            except ValueError as e:
-                print(f"ERROR creating L matrix: {e}")
-                print(f"L_matrix content: {L_matrix}")
-                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+            # For frozen matrices, use the current policy values unchanged
+            if self.frozen_factor == 'L':
+                L = self.policy.L.copy()
+            else:
+                try:
+                    L = np.array(L_matrix)
+                except ValueError as e:
+                    print(f"ERROR creating L matrix: {e}")
+                    print(f"L_matrix content: {L_matrix}")
+                    return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
-            try:
-                U = np.array(U_matrix)
-            except ValueError as e:
-                print(f"ERROR creating U matrix: {e}")
-                print(f"U_matrix content: {U_matrix}")
-                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+            if self.frozen_factor == 'U':
+                U = self.policy.U.copy()
+            else:
+                try:
+                    U = np.array(U_matrix)
+                except ValueError as e:
+                    print(f"ERROR creating U matrix: {e}")
+                    print(f"U_matrix content: {U_matrix}")
+                    return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             bias = np.array(bias_vector).reshape(1, -1) if bias_vector else self.policy.bias
             
             print(f"Parsed L shape: {L.shape}, U shape: {U.shape}, bias shape: {bias.shape}")
             
-            # Validate shapes
+            # Validate shapes (always check both, even if one was kept from current policy)
             expected_L_shape = (self.policy.dim_states, self.factor_rank)
             expected_U_shape = (self.factor_rank, self.policy.dim_actions)
             
             if L.shape != expected_L_shape:
                 print(f"ERROR: L matrix has wrong shape {L.shape}, expected {expected_L_shape}")
-                print(f"LLM provided {len(L_matrix)} rows, expected {expected_L_shape[0]} rows with {expected_L_shape[1]} columns each")
+                if self.frozen_factor != 'L':
+                    print(f"LLM provided {len(L_matrix)} rows, expected {expected_L_shape[0]} rows with {expected_L_shape[1]} columns each")
                 return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             if U.shape != expected_U_shape:
                 print(f"ERROR: U matrix has wrong shape {U.shape}, expected {expected_U_shape}")
-                print(f"LLM provided {len(U_matrix)} rows, expected {expected_U_shape[0]} rows with {expected_U_shape[1]} columns each")
+                if self.frozen_factor != 'U':
+                    print(f"LLM provided {len(U_matrix)} rows, expected {expected_U_shape[0]} rows with {expected_U_shape[1]} columns each")
                 return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             print(f"✓ Shapes validated correctly")
-            print(f"L matrix:\n{L}")
-            print(f"U matrix:\n{U}")
+            if self.frozen_factor != 'L':
+                print(f"L matrix:\n{L}")
+            if self.frozen_factor != 'U':
+                print(f"U matrix:\n{U}")
             
             return {'L': L, 'U': U, 'bias': bias}
 
@@ -311,11 +372,29 @@ class LLMNumOptimAgent:
             return text
         
         def str_factor_examples(replay_buffer: EpisodeRewardBufferNoBias):
-            """Format examples showing L, U matrices and rewards."""
-            if len(replay_buffer.buffer) == 0:
-                return "(No previous attempts yet)\n"
+            """Format examples showing L/U matrices and rewards.
             
-            text = f"Total previous attempts: {len(replay_buffer.buffer)}\n"
+            When frozen_factor is set, only the optimizable matrix is shown per
+            attempt and the frozen matrix is displayed once at the top.
+            """
+            # ---- Frozen-matrix preamble ----
+            preamble = ""
+            if self.frozen_factor == 'L' and self.policy.L is not None:
+                preamble += "FIXED L matrix (stays constant – do NOT change this):\n"
+                for row in self.policy.L:
+                    preamble += ", ".join([f"{x:.2f}" for x in row]) + "\n"
+                preamble += "\n"
+            elif self.frozen_factor == 'U' and self.policy.U is not None:
+                preamble += "FIXED U matrix (stays constant – do NOT change this):\n"
+                for row in self.policy.U:
+                    preamble += ", ".join([f"{x:.2f}" for x in row]) + "\n"
+                preamble += "\n"
+            
+            if len(replay_buffer.buffer) == 0:
+                return preamble + "(No previous attempts yet)\n"
+            
+            text = preamble
+            text += f"Total previous attempts: {len(replay_buffer.buffer)}\n"
             text += "=" * 60 + "\n\n"
             
             for idx, (weights, reward) in enumerate(replay_buffer.buffer, 1):
@@ -324,12 +403,15 @@ class LLMNumOptimAgent:
                     L = weights['L']
                     U = weights['U']
                     text += f"Attempt #{idx}:\n"
-                    text += "L matrix:\n"
-                    for row in L:
-                        text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
-                    text += "U matrix:\n"
-                    for row in U:
-                        text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
+                    # Only show the matrix the LLM is allowed to change
+                    if self.frozen_factor != 'L':
+                        text += "L matrix:\n"
+                        for row in L:
+                            text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
+                    if self.frozen_factor != 'U':
+                        text += "U matrix:\n"
+                        for row in U:
+                            text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
                     text += f"f(params): {reward:.2f}\n\n"
                 else:
                     # Fallback to flat parameters
@@ -345,7 +427,7 @@ class LLMNumOptimAgent:
         print("Updating the policy...")
         
         if self.use_factorized_policy:
-            # Two-matrix policy: LLM generates L and U, policy = L @ U
+            # Two-matrix policy: LLM generates L and/or U, policy = L @ U
             new_factor_components, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
                 str_factor_examples(self.replay_buffer),
                 parse_factor_matrices,
@@ -356,7 +438,8 @@ class LLMNumOptimAgent:
                 dim_state=self.policy.dim_states,
                 dim_action=self.policy.dim_actions,
                 factor_rank=self.factor_rank,
-                use_factorized=True
+                use_factorized=True,
+                frozen_factor=self.frozen_factor,
             )
             self.api_call_time += api_time
             
@@ -405,15 +488,10 @@ class LLMNumOptimAgent:
                 result = self.rollout_episode(world, logging_file, record=False)
             results.append(result)
         print(f"Results: {results}")
-        # Trim 3 highest and 3 lowest rollouts before computing statistics
-        if len(results) > 6:
-            trimmed_results = sorted(results)[3:-3]
-        else:
-            trimmed_results = results
-        result = np.mean(trimmed_results)
-        variance = np.var(trimmed_results)
-        std = np.std(trimmed_results)
-        print(f"Trimmed Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
+        result = np.mean(results)
+        variance = np.var(results)
+        std = np.std(results)
+        print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
         self.replay_buffer.add(new_parameter_list, result)
         
         # Track training rewards only
@@ -431,9 +509,6 @@ class LLMNumOptimAgent:
         self.plot_reward_progress(logdir)
         self.plot_policy_heatmap(logdir)
         print(f"[Visualization] Plots saved to {logdir}")
-
-        # Clear GPU memory after episode to prevent OOM
-        self.llm_brain.clear_cache()
 
         self.training_episodes += 1
 
@@ -455,11 +530,30 @@ class LLMNumOptimAgent:
         episodes = list(range(len(self.training_rewards)))
         
         plt.plot(episodes, self.training_rewards, 'b-', marker='o', markersize=4, linewidth=2)
-        
+        # Draw best reward indicator (horizontal line + marker)
+        try:
+            # Determine best reward from tracked value and current rewards
+            candidate_best = [r for r in self.training_rewards if r is not None]
+            if self.best_reward is not None and self.best_reward != -float('inf'):
+                candidate_best.append(self.best_reward)
+            best_value = max(candidate_best) if candidate_best else None
+        except Exception:
+            best_value = None
+
+        if best_value is not None:
+            plt.axhline(best_value, color='red', linestyle='--', linewidth=1.5, alpha=0.8, label=f'Best: {best_value:.2f}')
+            # Mark the episode where the best reward occurred (from history)
+            try:
+                best_idx = int(np.argmax(self.training_rewards))
+                plt.scatter([best_idx], [self.training_rewards[best_idx]], color='red', s=80, zorder=5)
+            except Exception:
+                pass
+
         plt.xlabel('Training Episode', fontsize=12)
         plt.ylabel('Reward', fontsize=12)
         plt.title('Training Reward Progress', fontsize=14)
         plt.grid(True, alpha=0.3)
+        plt.legend(loc='best')
         
         plot_filename = f"{logdir}/reward_progress.png"
         plt.savefig(plot_filename, dpi=150, bbox_inches='tight')

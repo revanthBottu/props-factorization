@@ -16,7 +16,7 @@ class LinearPolicy(Policy):
                 # Default: use min(dim_states, dim_actions) // 2 for reduced representation
                 self.factor_rank = max(1, min(dim_states, dim_actions) // 2)
             else:
-                self.factor_rank = min(factor_rank, min(dim_states, dim_actions))
+                self.factor_rank = factor_rank
         else:
             self.factor_rank = None
 

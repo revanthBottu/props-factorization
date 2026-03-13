@@ -19,3 +19,5 @@ optimum: 500
 search_step_size: 0.1
 use_factorized_policy: true  # Enable factorized policy
 factor_rank: 2  # Inner dimension for L @ U (4 states, 2 actions, so 2 is good)
+# frozen_factor: null | "L" | "U"  (null = both updated; "L" = freeze L; "U" = freeze U)
+frozen_factor: null

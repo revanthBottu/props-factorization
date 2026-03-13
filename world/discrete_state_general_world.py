@@ -32,8 +32,11 @@ class DiscreteStateGeneralWorld(BaseWorld):
         self.env_kwargs = env_kwargs
 
 
-    def reset(self):
-        state, _ = self.env.reset()
+    def reset(self, seed=None):
+        try:
+            state, _ = self.env.reset(seed=seed)
+        except TypeError:
+            state, _ = self.env.reset()
         self.steps = 0
         self.accu_reward = 0
 

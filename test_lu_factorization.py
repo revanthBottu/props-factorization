@@ -127,6 +127,15 @@ def test_visualization():
     
     plt.figure(figsize=(10, 6))
     plt.plot(episodes, rewards, 'b-', marker='o', markersize=4, linewidth=2)
+    # Best reward indicator
+    try:
+        best_val = max(rewards)
+        best_idx = int(np.argmax(rewards))
+        plt.axhline(best_val, color='red', linestyle='--', linewidth=1.5, alpha=0.8, label=f'Best: {best_val:.2f}')
+        plt.scatter([best_idx], [rewards[best_idx]], color='red', s=80, zorder=5)
+        plt.legend(loc='best')
+    except Exception:
+        pass
     plt.xlabel('Training Episode', fontsize=12)
     plt.ylabel('Reward', fontsize=12)
     plt.title('Training Reward Progress', fontsize=14)

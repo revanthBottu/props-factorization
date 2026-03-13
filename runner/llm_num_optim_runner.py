@@ -33,6 +33,8 @@ def run_training_loop(
     env_kwargs=None,
     use_factorized_policy=False,
     factor_rank=None,
+    frozen_factor=None,
+    seed=None,
 ):
     assert task in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj", "dist_state_llm_num_optim"]
 
@@ -51,6 +53,7 @@ def run_training_loop(
 
 
         if task == "cont_space_llm_num_optim":
+            print(f"[DEBUG runner] use_factorized_policy={use_factorized_policy}, factor_rank={factor_rank}")
             agent = LLMNumOptimAgent(
                 logdir,
                 dim_actions,
@@ -66,6 +69,8 @@ def run_training_loop(
                 search_step_size,
                 use_factorized_policy=use_factorized_policy,
                 factor_rank=factor_rank,
+                frozen_factor=frozen_factor,
+                seed=seed,
             )
         elif task == "cont_space_llm_num_optim_rndm_proj":
             agent = LLMNumOptimRndmPrjAgent(
@@ -81,6 +86,7 @@ def run_training_loop(
                 rank,
                 bias,
                 optimum,
+                seed=seed,
             )
 
 
@@ -104,6 +110,7 @@ def run_training_loop(
             num_evaluation_episodes,
             optimum,
             env_kwargs=env_kwargs,
+            seed=seed,
         )
 
         print('init done')

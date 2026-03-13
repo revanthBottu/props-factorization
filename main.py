@@ -19,6 +19,9 @@ def main():
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
+    print(f"[DEBUG main] config loaded: factor_rank={config.get('factor_rank')}, use_factorized_policy={config.get('use_factorized_policy')}")
+    print(f"[DEBUG main] full config: {config}")
+
     if config["task"] in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj", "dist_state_llm_num_optim"]:
         llm_num_optim_runner.run_training_loop(**config)
     elif config["task"] in ["dist_state_llm_num_optim_semantics", "cont_state_llm_num_optim_semantics"]:

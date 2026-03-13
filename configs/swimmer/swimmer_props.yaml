@@ -10,7 +10,7 @@ max_traj_length: 1000
 template_dir: agent/policy/templates
 llm_si_template_name: num_optim.j2
 llm_output_conversion_template_name: num_optim.j2
-llm_model_name: gpt-4o
+llm_model_name: gemini-2.5-flash
 num_evaluation_episodes: 20
 warmup_episodes: 20
 warmup_dir: null

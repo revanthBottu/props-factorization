@@ -4,6 +4,7 @@ import re
 import numpy as np
 import os
 import time
+import gc
 from jinja2 import Template
 # from openai import OpenAI
 from dotenv import load_dotenv
@@ -39,6 +40,7 @@ class LLMBrain:
         self.llm_output_conversion_template = llm_output_conversion_template
         self.llm_conversation = []
         self.use_cuda = False  # Track if we're using CUDA
+        self.hf_input_device = "cpu"
         
         # Detect if this is a HuggingFace model (contains / indicating org/model format)
         # HuggingFace paths: "Qwen/Qwen3.5-72B-Instruct", "meta-llama/Llama-3.1-70B", etc.
@@ -59,6 +61,7 @@ class LLMBrain:
             "gemini-1.5-pro",
             "gemini-2.5-pro-preview-05-06",
             "gemini-2.5-flash-preview-04-17",
+            "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
             "o3-mini-2025-01-31",
             "gpt-4o-2024-11-20",
@@ -78,6 +81,21 @@ class LLMBrain:
             self.model_group = "huggingface"
             
             print(f"Loading HuggingFace model: {llm_model_name}")
+
+            cuda_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+            if cuda_count > 0:
+                gpu_mem_budget = os.environ.get("HF_GPU_MAX_MEMORY_GIB", "78GiB")
+                cpu_mem_budget = os.environ.get("HF_CPU_MAX_MEMORY_GIB", "120GiB")
+                max_memory = {gpu_idx: gpu_mem_budget for gpu_idx in range(cuda_count)}
+                max_memory["cpu"] = cpu_mem_budget
+                device_map = "auto"
+                print(
+                    f"CUDA detected ({cuda_count} GPU(s)); using device_map='auto' with max_memory={max_memory}"
+                )
+            else:
+                max_memory = None
+                device_map = "cpu"
+                print("Warning: CUDA not detected. Large models may not be runnable on CPU.")
             
             # Load tokenizer
             self.hf_tokenizer = AutoTokenizer.from_pretrained(llm_model_name)
@@ -105,13 +123,16 @@ class LLMBrain:
                              getattr(config_quant, "bits", None) or "unknown"
                 print(f"Pre-quantized model detected (type: {quant_type}). "
                       "Loading without additional quantization.")
-                self.hf_model = AutoModelForCausalLM.from_pretrained(
-                    llm_model_name,
-                    device_map="cuda",
-                    trust_remote_code=True,
-                    torch_dtype="auto",
-                )
-                print("Successfully loaded pre-quantized model onto GPU")
+                load_kwargs = {
+                    "trust_remote_code": True,
+                    "torch_dtype": "auto",
+                    "device_map": device_map,
+                    "low_cpu_mem_usage": True,
+                }
+                if max_memory is not None:
+                    load_kwargs["max_memory"] = max_memory
+                self.hf_model = AutoModelForCausalLM.from_pretrained(llm_model_name, **load_kwargs)
+                print("Successfully loaded pre-quantized model")
             else:
                 # Apply NF4 4-bit quantization — best quality/VRAM tradeoff for
                 # inference.  Double-quant further reduces the quantization
@@ -124,13 +145,20 @@ class LLMBrain:
                     bnb_4bit_use_double_quant=True,
                     bnb_4bit_quant_type="nf4",
                 )
-                self.hf_model = AutoModelForCausalLM.from_pretrained(
-                    llm_model_name,
-                    quantization_config=quantization_config,
-                    device_map="cuda",
-                    trust_remote_code=True,
-                )
+                load_kwargs = {
+                    "quantization_config": quantization_config,
+                    "device_map": device_map,
+                    "trust_remote_code": True,
+                    "low_cpu_mem_usage": True,
+                }
+                if max_memory is not None:
+                    load_kwargs["max_memory"] = max_memory
+                self.hf_model = AutoModelForCausalLM.from_pretrained(llm_model_name, **load_kwargs)
                 print("Successfully loaded with NF4 4-bit quantization")
+
+            self.hf_model.eval()
+            self.hf_input_device = self._detect_hf_input_device()
+            print(f"HuggingFace input device: {self.hf_input_device}")
             
             # Remove unsupported generation parameters to avoid warnings
             if hasattr(self.hf_model, 'generation_config'):
@@ -145,7 +173,7 @@ class LLMBrain:
             print(f"HuggingFace model ready — {quant_status}")
             
             # Track if model is on CUDA
-            self.use_cuda = torch.cuda.is_available() and next(self.hf_model.parameters()).is_cuda
+            self.use_cuda = torch.cuda.is_available() and "cuda" in str(self.hf_input_device)
         elif is_ollama_model:
             if not OLLAMA_AVAILABLE:
                 raise ImportError("Ollama package not installed. Install with: pip install ollama")
@@ -214,6 +242,33 @@ class LLMBrain:
         prompt += "<|assistant|>\n"
         return prompt
 
+    def _detect_hf_input_device(self):
+        """Choose an input device compatible with sharded HF models."""
+        hf_device_map = getattr(self.hf_model, "hf_device_map", None)
+        if isinstance(hf_device_map, dict):
+            unique_devices = []
+            for mapped_device in hf_device_map.values():
+                if isinstance(mapped_device, int):
+                    normalized = f"cuda:{mapped_device}"
+                else:
+                    normalized = str(mapped_device)
+                if normalized not in unique_devices:
+                    unique_devices.append(normalized)
+            for preferred_prefix in ("cuda", "mps", "xpu"):
+                for mapped_device in unique_devices:
+                    if mapped_device.startswith(preferred_prefix):
+                        return mapped_device
+            if unique_devices:
+                return unique_devices[0]
+        return str(getattr(self.hf_model, "device", "cpu"))
+
+    def _clear_cuda_cache(self):
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            if hasattr(torch.cuda, "ipc_collect"):
+                torch.cuda.ipc_collect()
+        gc.collect()
+
     def _normalize_local_response(self, response: str) -> str:
         """Post-process raw output from local models (HuggingFace / Ollama).
         """
@@ -253,19 +308,20 @@ class LLMBrain:
         prompt = self._format_hf_chat()
         current_max_tokens = max_new_tokens
         min_tokens = 64
+        use_kv_cache = True
 
         while current_max_tokens >= min_tokens:
             inputs = None
             try:
                 inputs = self.hf_tokenizer(
                     prompt, return_tensors="pt", padding=True
-                ).to(self.hf_model.device)
+                ).to(self.hf_input_device)
 
                 gen_kwargs = dict(
                     max_new_tokens=current_max_tokens,
                     do_sample=do_sample,
                     pad_token_id=self.hf_tokenizer.pad_token_id,
-                    use_cache=True,
+                    use_cache=use_kv_cache,
                 )
                 if do_sample:
                     gen_kwargs["temperature"] = temperature
@@ -279,20 +335,24 @@ class LLMBrain:
                 )
                 del inputs, outputs
                 if self.use_cuda:
-                    torch.cuda.empty_cache()
+                    self._clear_cuda_cache()
                 return response
 
             except Exception as e:
                 if inputs is not None:
                     del inputs
                 if self.use_cuda:
-                    torch.cuda.empty_cache()
+                    self._clear_cuda_cache()
 
                 is_oom = "out of memory" in str(e).lower() or (
                     hasattr(torch.cuda, "OutOfMemoryError")
                     and isinstance(e, torch.cuda.OutOfMemoryError)
                 )
                 if is_oom:
+                    if use_kv_cache:
+                        use_kv_cache = False
+                        print("[OOM] Retrying with use_cache=False to lower KV memory.")
+                        continue
                     current_max_tokens //= 2
                     if current_max_tokens < min_tokens:
                         raise RuntimeError(
@@ -314,7 +374,7 @@ class LLMBrain:
     def clear_cache(self):
         """Clear GPU cache to prevent OOM between episodes."""
         if self.use_cuda:
-            torch.cuda.empty_cache()
+            self._clear_cuda_cache()
             print("[Memory] GPU cache cleared")
 
     def add_llm_conversation(self, text, role):
@@ -563,6 +623,7 @@ class LLMBrain:
         dim_action=None,
         factor_rank=None,
         use_factorized=False,
+        frozen_factor=None,
     ):
         self.reset_llm_conversation()
 
@@ -577,6 +638,7 @@ class LLMBrain:
                 "dim_state": dim_state,
                 "dim_action": dim_action,
                 "factor_rank": factor_rank,
+                "frozen_factor": frozen_factor,
             }
         )
 

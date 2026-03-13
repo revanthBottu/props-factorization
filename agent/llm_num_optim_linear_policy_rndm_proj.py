@@ -6,6 +6,12 @@ from world.base_world import BaseWorld
 import numpy as np
 import re
 import time
+import random
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except Exception:
+    TORCH_AVAILABLE = False
 
 
 class LLMNumOptimRndmPrjAgent:
@@ -23,6 +29,7 @@ class LLMNumOptimRndmPrjAgent:
         rank,
         bias,
         optimum,
+        seed: int = None,
     ):
         self.start_time = time.process_time()
         self.api_call_time = 0
@@ -32,6 +39,7 @@ class LLMNumOptimRndmPrjAgent:
         self.dim_state = dim_state
         self.bias = bias
         self.optimum = optimum
+        self.seed = seed if seed is not None else 42
 
         if not self.bias:
             param_count = dim_action * dim_state
@@ -66,7 +74,17 @@ class LLMNumOptimRndmPrjAgent:
         return (parameters.reshape(-1) @ self.low_to_high_projection_matrix).reshape(self.dim_state, self.dim_action)
 
     def rollout_episode(self, world: BaseWorld, logging_file, record=True):
-        state = world.reset()
+        # deterministic seed per episode
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        if TORCH_AVAILABLE:
+            try:
+                torch.manual_seed(self.seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(self.seed)
+            except Exception:
+                pass
+        state = world.reset(seed=self.seed)
         state = np.expand_dims(state, axis=0)
         logging_file.write(f"{', '.join([str(x) for x in self.policy.get_parameters().reshape(-1)])}\n")
         logging_file.write(f"parameter ends\n\n")

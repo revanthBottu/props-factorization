@@ -259,32 +259,56 @@ class LLMNumOptimAgent:
             L_matrix = []
             U_matrix = []
             bias_vector = []
+            L_blocks = []
+            U_blocks = []
             
             current_section = None
             expected_L_cols = self.factor_rank
             expected_U_cols = self.policy.dim_actions
+            number_pattern = r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?'
             
             for line in lines:
                 line = line.strip()
-                if 'L matrix:' in line or 'L Matrix:' in line:
+
+                # Stop parsing when the model explicitly starts explaining.
+                if re.match(r'^(explanation|reasoning|rationale|why)\b', line, re.IGNORECASE):
+                    break
+
+                # Be permissive about matrix headers (markdown, missing colon, case variants,
+                # and local model prefixes like "assistantfinalU matrix:").
+                line_lower = line.lower()
+                if 'l matrix' in line_lower:
+                    if current_section == 'L' and L_matrix:
+                        L_blocks.append(L_matrix)
+                        L_matrix = []
                     current_section = 'L'
                     continue
-                elif 'U matrix:' in line or 'U Matrix:' in line:
+                elif 'u matrix' in line_lower:
+                    if current_section == 'U' and U_matrix:
+                        U_blocks.append(U_matrix)
+                        U_matrix = []
                     current_section = 'U'
                     continue
-                elif 'Bias:' in line or 'bias:' in line:
+                elif 'bias' in line_lower:
                     current_section = 'bias'
                     continue
-                elif 'Explanation:' in line or 'explanation:' in line or line.startswith('Note:'):
-                    break
-                
+
                 # Parse numerical values
                 if current_section and line and not line.startswith('Explanation') and not line.startswith('Note'):
-                    # Extract numbers from the line (including negative numbers and decimals)
-                    numbers = re.findall(r'[+-]?\d+(?:\.\d+)?', line)
-                    if numbers:
+                    # Some models emit rows as: [a, b], [c, d] ... on one line.
+                    # Prefer bracket groups first, then fall back to semicolon/line parsing.
+                    row_chunks = re.findall(r'\[([^\[\]]+)\]', line)
+                    if not row_chunks:
+                        row_chunks = [chunk for chunk in line.split(';') if chunk.strip()]
+
+                    parsed_any = False
+                    for chunk in row_chunks:
+                        numbers = re.findall(number_pattern, chunk)
+                        if not numbers:
+                            continue
+                        parsed_any = True
                         row = [float(x) for x in numbers]
-                        
+
                         # Validate row length before adding
                         if current_section == 'L':
                             if self.frozen_factor == 'L':
@@ -302,7 +326,48 @@ class LLMNumOptimAgent:
                                 print(f"Warning: Skipping U row with {len(row)} values (expected {expected_U_cols}): {row}")
                         elif current_section == 'bias':
                             bias_vector.extend(row)
+
+                    # If no bracket/semicolon chunks were parseable, parse raw line once.
+                    if not parsed_any:
+                        numbers = re.findall(number_pattern, line)
+                        if numbers:
+                            row = [float(x) for x in numbers]
+                            if current_section == 'L':
+                                if self.frozen_factor == 'L':
+                                    pass
+                                elif len(row) == expected_L_cols:
+                                    L_matrix.append(row)
+                                else:
+                                    print(f"Warning: Skipping L row with {len(row)} values (expected {expected_L_cols}): {row}")
+                            elif current_section == 'U':
+                                if self.frozen_factor == 'U':
+                                    pass
+                                elif len(row) == expected_U_cols:
+                                    U_matrix.append(row)
+                                else:
+                                    print(f"Warning: Skipping U row with {len(row)} values (expected {expected_U_cols}): {row}")
+                            elif current_section == 'bias':
+                                bias_vector.extend(row)
             
+            if current_section == 'L' and L_matrix:
+                L_blocks.append(L_matrix)
+            if current_section == 'U' and U_matrix:
+                U_blocks.append(U_matrix)
+
+            expected_L_rows = self.policy.dim_states
+            expected_U_rows = self.factor_rank
+
+            # Prefer the last block with enough rows, because some local models echo
+            # prior attempts before emitting the final answer.
+            if L_blocks:
+                valid_L_blocks = [blk for blk in L_blocks if len(blk) >= expected_L_rows]
+                chosen_L = valid_L_blocks[-1] if valid_L_blocks else L_blocks[-1]
+                L_matrix = chosen_L[-expected_L_rows:]
+            if U_blocks:
+                valid_U_blocks = [blk for blk in U_blocks if len(blk) >= expected_U_rows]
+                chosen_U = valid_U_blocks[-1] if valid_U_blocks else U_blocks[-1]
+                U_matrix = chosen_U[-expected_U_rows:]
+
             print(f"Parsed {len(L_matrix)} L rows, {len(U_matrix)} U rows (frozen_factor={self.frozen_factor!r})")
             
             # For frozen matrices, use the current policy values unchanged

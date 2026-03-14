@@ -29,6 +29,11 @@ except ImportError:
 
 load_dotenv()
 
+
+def _is_oom_exception(err: Exception) -> bool:
+    err_text = str(err).lower()
+    return "out of memory" in err_text or "cuda out of memory" in err_text
+
 class LLMBrain:
     def __init__(
         self,
@@ -84,9 +89,26 @@ class LLMBrain:
 
             cuda_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
             if cuda_count > 0:
-                gpu_mem_budget = os.environ.get("HF_GPU_MAX_MEMORY_GIB", "78GiB")
+                gpu_reserve_gib = float(os.environ.get("HF_GPU_MEMORY_RESERVE_GIB", "2"))
+                requested_gpu_budget = os.environ.get("HF_GPU_MAX_MEMORY_GIB")
                 cpu_mem_budget = os.environ.get("HF_CPU_MAX_MEMORY_GIB", "120GiB")
-                max_memory = {gpu_idx: gpu_mem_budget for gpu_idx in range(cuda_count)}
+                max_memory = {}
+                for gpu_idx in range(cuda_count):
+                    total_gib = torch.cuda.get_device_properties(gpu_idx).total_memory / (1024**3)
+                    detected_budget_gib = max(8, int(total_gib - gpu_reserve_gib))
+                    if requested_gpu_budget is not None:
+                        try:
+                            requested_budget_gib = float(requested_gpu_budget.replace("GiB", "").strip())
+                        except ValueError:
+                            requested_budget_gib = detected_budget_gib
+                            print(
+                                f"Warning: HF_GPU_MAX_MEMORY_GIB='{requested_gpu_budget}' is invalid. "
+                                f"Using detected budget {detected_budget_gib}GiB for GPU {gpu_idx}."
+                            )
+                        final_budget_gib = int(min(requested_budget_gib, detected_budget_gib))
+                    else:
+                        final_budget_gib = detected_budget_gib
+                    max_memory[gpu_idx] = f"{final_budget_gib}GiB"
                 max_memory["cpu"] = cpu_mem_budget
                 device_map = "auto"
                 print(
@@ -112,7 +134,7 @@ class LLMBrain:
 
             # Also catch models whose names signal quantization but whose config
             # may not yet be saved correctly (older checkpoints).
-            name_quant_signals = ['fp8', 'gptq', 'awq', 'int4', 'int8', 'gpt-oss', '-oss', 'mxfp4']
+            name_quant_signals = ['fp8', 'gptq', 'awq', 'int4', 'int8', 'mxfp4']
             if not is_prequantized and any(x in llm_model_name.lower() for x in name_quant_signals):
                 print("Warning: quantization not detected in config but model name suggests "
                       "it is pre-quantized. Loading without additional quantization.")
@@ -123,16 +145,41 @@ class LLMBrain:
                              getattr(config_quant, "bits", None) or "unknown"
                 print(f"Pre-quantized model detected (type: {quant_type}). "
                       "Loading without additional quantization.")
-                load_kwargs = {
-                    "trust_remote_code": True,
-                    "torch_dtype": "auto",
-                    "device_map": device_map,
-                    "low_cpu_mem_usage": True,
-                }
-                if max_memory is not None:
-                    load_kwargs["max_memory"] = max_memory
-                self.hf_model = AutoModelForCausalLM.from_pretrained(llm_model_name, **load_kwargs)
-                print("Successfully loaded pre-quantized model")
+                try:
+                    load_kwargs = {
+                        "trust_remote_code": True,
+                        "torch_dtype": "auto",
+                        "device_map": device_map,
+                        "low_cpu_mem_usage": True,
+                    }
+                    if max_memory is not None:
+                        load_kwargs["max_memory"] = max_memory
+                    self.hf_model = AutoModelForCausalLM.from_pretrained(llm_model_name, **load_kwargs)
+                    print("Successfully loaded pre-quantized model")
+                except Exception as e:
+                    if not _is_oom_exception(e):
+                        raise
+                    print(
+                        "[OOM] Pre-quantized load failed. Retrying with NF4 4-bit quantization "
+                        "to reduce memory pressure."
+                    )
+                    quantization_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.bfloat16,
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_quant_type="nf4",
+                    )
+                    load_kwargs = {
+                        "quantization_config": quantization_config,
+                        "device_map": device_map,
+                        "trust_remote_code": True,
+                        "low_cpu_mem_usage": True,
+                    }
+                    if max_memory is not None:
+                        load_kwargs["max_memory"] = max_memory
+                    self.hf_model = AutoModelForCausalLM.from_pretrained(llm_model_name, **load_kwargs)
+                    is_prequantized = False
+                    print("Successfully loaded with NF4 4-bit quantization after OOM fallback")
             else:
                 # Apply NF4 4-bit quantization — best quality/VRAM tradeoff for
                 # inference.  Double-quant further reduces the quantization

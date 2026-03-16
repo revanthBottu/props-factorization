@@ -89,7 +89,9 @@ class LLMBrain:
 
             cuda_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
             if cuda_count > 0:
-                gpu_reserve_gib = float(os.environ.get("HF_GPU_MEMORY_RESERVE_GIB", "2"))
+                # Keep substantial VRAM headroom for prefill/decoding activations,
+                # KV cache, and allocator fragmentation at generation time.
+                gpu_reserve_gib = float(os.environ.get("HF_GPU_MEMORY_RESERVE_GIB", "10"))
                 requested_gpu_budget = os.environ.get("HF_GPU_MAX_MEMORY_GIB")
                 cpu_mem_budget = os.environ.get("HF_CPU_MAX_MEMORY_GIB", "120GiB")
                 max_memory = {}
@@ -118,6 +120,18 @@ class LLMBrain:
                 max_memory = None
                 device_map = "cpu"
                 print("Warning: CUDA not detected. Large models may not be runnable on CPU.")
+
+            # Optional disk offload for large models to reduce VRAM pressure.
+            # Enable with HF_ENABLE_DISK_OFFLOAD=1.
+            offload_kwargs = {}
+            if os.environ.get("HF_ENABLE_DISK_OFFLOAD", "0") == "1":
+                offload_folder = os.environ.get("HF_DISK_OFFLOAD_DIR", ".hf_offload")
+                os.makedirs(offload_folder, exist_ok=True)
+                offload_kwargs = {
+                    "offload_folder": offload_folder,
+                    "offload_state_dict": True,
+                }
+                print(f"HF disk offload enabled at: {offload_folder}")
             
             # Load tokenizer
             self.hf_tokenizer = AutoTokenizer.from_pretrained(llm_model_name)
@@ -154,6 +168,7 @@ class LLMBrain:
                     }
                     if max_memory is not None:
                         load_kwargs["max_memory"] = max_memory
+                    load_kwargs.update(offload_kwargs)
                     self.hf_model = AutoModelForCausalLM.from_pretrained(llm_model_name, **load_kwargs)
                     print("Successfully loaded pre-quantized model")
                 except Exception as e:
@@ -177,6 +192,7 @@ class LLMBrain:
                     }
                     if max_memory is not None:
                         load_kwargs["max_memory"] = max_memory
+                    load_kwargs.update(offload_kwargs)
                     self.hf_model = AutoModelForCausalLM.from_pretrained(llm_model_name, **load_kwargs)
                     is_prequantized = False
                     print("Successfully loaded with NF4 4-bit quantization after OOM fallback")
@@ -200,6 +216,7 @@ class LLMBrain:
                 }
                 if max_memory is not None:
                     load_kwargs["max_memory"] = max_memory
+                load_kwargs.update(offload_kwargs)
                 self.hf_model = AutoModelForCausalLM.from_pretrained(llm_model_name, **load_kwargs)
                 print("Successfully loaded with NF4 4-bit quantization")
 
@@ -345,24 +362,60 @@ class LLMBrain:
 
         return "\n".join(lines)
 
-    def _generate_with_hf(self, max_new_tokens=384, temperature=0.7, do_sample=True):
+    def _generate_with_hf(self, max_new_tokens=None, temperature=0.7, do_sample=True):
         """Generate a response from the loaded HuggingFace model.
 
-        Automatically recovers from VRAM OOM by halving max_new_tokens and
-        retrying until the budget drops below 64 tokens, at which point a
-        RuntimeError is raised so callers can surface the problem clearly.
+        OOM recovery prioritizes preserving full output length. By default,
+        max_new_tokens is NOT reduced on OOM to avoid clipping structured
+        matrix outputs (L/U rows). Prompt-window reduction remains available
+        as a last-resort fallback and can be disabled via env.
         """
         prompt = self._format_hf_chat()
+        if max_new_tokens is None:
+            # Larger default budget to fit full matrix outputs without clipping.
+            max_new_tokens = int(os.environ.get("HF_MAX_NEW_TOKENS", "1024"))
+
+        # Keep output token budget fixed by default to avoid truncated matrices.
+        allow_output_shrink = os.environ.get("HF_ALLOW_OUTPUT_TOKEN_SHRINK", "0") == "1"
         current_max_tokens = max_new_tokens
-        min_tokens = 64
+        min_tokens = int(os.environ.get("HF_MIN_NEW_TOKENS", "256"))
+
+        # If disabled, we can still shrink prompt window for OOM, but never output length.
+        allow_prompt_shrink = os.environ.get("HF_ALLOW_PROMPT_WINDOW_SHRINK", "1") == "1"
+        truncate_prompt = os.environ.get("HF_TRUNCATE_PROMPT", "0") == "1"
+        min_input_tokens = 512
         use_kv_cache = True
+
+        tokenizer_hard_cap = getattr(self.hf_tokenizer, "model_max_length", 4096)
+        if tokenizer_hard_cap is None or tokenizer_hard_cap <= 0 or tokenizer_hard_cap > 1_000_000:
+            tokenizer_hard_cap = 4096
+        env_prompt_cap = int(os.environ.get("HF_MAX_INPUT_TOKENS", "4096"))
+        current_prompt_cap = max(min_input_tokens, min(env_prompt_cap, int(tokenizer_hard_cap)))
 
         while current_max_tokens >= min_tokens:
             inputs = None
             try:
+                tokenizer_kwargs = {
+                    "return_tensors": "pt",
+                    "padding": True,
+                }
+                if truncate_prompt:
+                    tokenizer_kwargs["truncation"] = True
+                    tokenizer_kwargs["max_length"] = current_prompt_cap
+                else:
+                    tokenizer_kwargs["truncation"] = False
+
                 inputs = self.hf_tokenizer(
-                    prompt, return_tensors="pt", padding=True
+                    prompt,
+                    **tokenizer_kwargs,
                 ).to(self.hf_input_device)
+
+                input_token_count = int(inputs["input_ids"].shape[1])
+                if truncate_prompt and input_token_count >= current_prompt_cap:
+                    print(
+                        f"[HF] Prompt truncated to {current_prompt_cap} tokens "
+                        "to stay within VRAM budget."
+                    )
 
                 gen_kwargs = dict(
                     max_new_tokens=current_max_tokens,
@@ -400,16 +453,35 @@ class LLMBrain:
                         use_kv_cache = False
                         print("[OOM] Retrying with use_cache=False to lower KV memory.")
                         continue
-                    current_max_tokens //= 2
-                    if current_max_tokens < min_tokens:
-                        raise RuntimeError(
-                            f"[OOM] VRAM exhausted even at {min_tokens} max_new_tokens. "
-                            "Free up VRAM, reduce input length, or use a smaller model."
-                        ) from e
-                    print(
-                        f"[OOM] VRAM exhausted. Retrying with "
-                        f"max_new_tokens={current_max_tokens}..."
-                    )
+                    if truncate_prompt and allow_prompt_shrink and current_prompt_cap > min_input_tokens:
+                        current_prompt_cap = max(min_input_tokens, current_prompt_cap // 2)
+                        print(
+                            f"[OOM] Retrying with smaller prompt window: "
+                            f"max_input_tokens={current_prompt_cap}..."
+                        )
+                        continue
+
+                    if allow_output_shrink:
+                        current_max_tokens //= 2
+                        if current_max_tokens < min_tokens:
+                            raise RuntimeError(
+                                f"[OOM] VRAM exhausted even at {min_tokens} max_new_tokens. "
+                                "Free up VRAM, reduce input length, or use a smaller model."
+                            ) from e
+                        print(
+                            f"[OOM] Retrying with smaller output budget: "
+                            f"max_new_tokens={current_max_tokens}..."
+                        )
+                        continue
+
+                    raise RuntimeError(
+                        "[OOM] Generation failed without shrinking output tokens. "
+                        "To permit output-token shrinking, set HF_ALLOW_OUTPUT_TOKEN_SHRINK=1. "
+                        "Other options: raise HF_GPU_MEMORY_RESERVE_GIB headroom strategy, "
+                        "use a smaller/stronger-quantized model, or enable prompt truncation via "
+                        "HF_TRUNCATE_PROMPT=1 with HF_ALLOW_PROMPT_WINDOW_SHRINK=1 and lower "
+                        "HF_MAX_INPUT_TOKENS."
+                    ) from e
                 else:
                     raise
 

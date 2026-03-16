@@ -106,19 +106,48 @@ class LLMNumOptimQTableSemanticsAgent:
     def train_policy(self, world: BaseWorld, logdir):
 
         def parse_parameters(input_text):
-            # This regex looks for integers or floating-point numbers (including optional sign)
-            s = input_text.split("\n")[-1]
-            print("response:", s)
-            pattern = re.compile(r"params\[(\d+)\]:\s*([+-]?\d+(?:\.\d+)?)")
-            matches = pattern.findall(s)
+            print("response:", input_text.split("\n")[0])
+            # Strict decimal format only (no scientific notation like 1e-3).
+            number_pattern = r'(?<![A-Za-z0-9_.])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?![A-Za-z0-9_.])'
 
-            # Convert matched strings to float (or int if you prefer to differentiate)
-            results = []
-            for match in matches:
-                results.append(float(match[1]))
-            print(results)
-            assert len(results) == self.rank
-            return np.array(results).reshape((self.rank,))
+            def _in_range(v: float) -> bool:
+                return -6.0 <= v <= 6.0
+
+            indexed = {}
+            for idx_s, val_s in re.findall(
+                r'params\s*\[\s*(\d+)\s*\]\s*[:=]\s*(' + number_pattern + r')',
+                input_text,
+                flags=re.IGNORECASE,
+            ):
+                idx = int(idx_s)
+                if 0 <= idx < self.rank:
+                    val = float(val_s)
+                    if _in_range(val):
+                        indexed[idx] = val
+
+            if len(indexed) == self.rank:
+                return np.array([indexed[i] for i in range(self.rank)], dtype=float).reshape((self.rank,))
+
+            candidate_lines = []
+            for line in input_text.split("\n"):
+                if "params" in line.lower():
+                    vals = [float(x) for x in re.findall(number_pattern, line)]
+                    if len(vals) >= self.rank:
+                        candidate = vals[:self.rank]
+                        if all(_in_range(v) for v in candidate):
+                            candidate_lines.append(candidate)
+            if candidate_lines:
+                return np.array(candidate_lines[-1], dtype=float).reshape((self.rank,))
+
+            all_vals = [float(x) for x in re.findall(number_pattern, input_text)]
+            bounded_vals = [v for v in all_vals if _in_range(v)]
+            if len(bounded_vals) >= self.rank:
+                return np.array(bounded_vals[-self.rank:], dtype=float).reshape((self.rank,))
+
+            raise ValueError(
+                f"Could not parse {self.rank} parameters from model output. "
+                f"Only found {len(bounded_vals)} in-range decimal tokens."
+            )
 
         def str_nd_examples(replay_buffer: EpisodeRewardBufferNoBias, traj_buffer: ReplayBuffer, n):
 
@@ -153,15 +182,25 @@ class LLMNumOptimQTableSemanticsAgent:
                 actions=self.actions,
             )
             self.api_call_time += api_time
+            update_applied = True
+        except ValueError as e:
+            update_applied = False
+            new_parameter_list = np.array(
+                [self.q_table.mapping[i] for i in range(len(self.q_table.mapping))],
+                dtype=float,
+            )
+            reasoning = f"Skipped update due to invalid LLM output: {e}"
+            print(f"[Parser validation] {reasoning}")
         except Exception as e:
             print("Exception occurred during policy update")
             print(traceback.format_exc())
             raise e
 
-        print(len(self.q_table.mapping))
-        print(new_parameter_list.shape)
-        self.q_table.update_policy(new_parameter_list)
-        print(len(self.q_table.mapping))
+        if update_applied:
+            print(len(self.q_table.mapping))
+            print(new_parameter_list.shape)
+            self.q_table.update_policy(new_parameter_list)
+            print(len(self.q_table.mapping))
         logging_q_filename = f"{logdir}/parameters.txt"
         logging_q_file = open(logging_q_filename, "w")
         logging_q_file.write(str(self.q_table.mapping))
@@ -170,7 +209,10 @@ class LLMNumOptimQTableSemanticsAgent:
         q_reasoning_file = open(q_reasoning_filename, "w")
         q_reasoning_file.write(reasoning)
         q_reasoning_file.close()
-        print("Policy updated!")
+        if update_applied:
+            print("Policy updated!")
+        else:
+            print("Policy update skipped for this episode.")
 
         # Run the episode and collect the trajectory
         print(f"Rolling out episode {self.training_episodes}...")

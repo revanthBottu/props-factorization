@@ -2,7 +2,7 @@ task: cont_space_llm_num_optim
 num_episodes: 400
 gym_env_name: InvertedDoublePendulum-v4
 render_mode: null
-logdir: logs/inverteddoublependulum_lu_local
+logdir: logs/inverteddoublependulum_lu_freeze_U
 dim_actions: 1
 dim_states: 11
 max_traj_count: 1000
@@ -10,7 +10,7 @@ max_traj_length: 1000
 template_dir: agent/policy/templates
 llm_si_template_name: num_optim_lu.j2
 llm_output_conversion_template_name: num_optim.j2
-llm_model_name: llama3.2:latest
+llm_model_name: /data/datasets/community/huggingface/models--openai--gpt-oss-120b/snapshots/8b193b0ef83bd41b40eb71fee8f1432315e02a3e
 num_evaluation_episodes: 20
 warmup_episodes: 20
 warmup_dir: null
@@ -18,6 +18,6 @@ bias: true
 optimum: 10000
 search_step_size: 0.1
 use_factorized_policy: true
-factor_rank: 3  # Inner dimension for L @ U (11 states, 1 action, so 3 is reasonable)
+factor_rank: 2  # Inner dimension for L @ U (11 states, 1 action, so 3 is reasonable)
 # frozen_factor: null | "L" | "U"  (null = both updated; "L" = freeze L; "U" = freeze U)
-frozen_factor: null
+frozen_factor: U

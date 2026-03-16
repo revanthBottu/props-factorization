@@ -231,21 +231,54 @@ class LLMNumOptimAgent:
                 self.plot_policy_heatmap(logdir)
 
     def train_policy(self, world: BaseWorld, logdir):
+        max_prompt_examples = int(os.environ.get("LLM_MAX_PROMPT_EXAMPLES", "12"))
 
         def parse_parameters(input_text):
-            # This regex looks for integers or floating-point numbers (including optional sign)
-            s = input_text.split("\n")[0]
-            print("response:", s)
-            pattern = re.compile(r"params\[(\d+)\]:\s*([+-]?\d+(?:\.\d+)?)")
-            matches = pattern.findall(s)
+            print("response:", input_text.split("\n")[0])
+            # Strict decimal format only (no scientific notation like 1e-3).
+            number_pattern = r'(?<![A-Za-z0-9_.])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?![A-Za-z0-9_.])'
 
-            # Convert matched strings to float (or int if you prefer to differentiate)
-            results = []
-            for match in matches:
-                results.append(float(match[1]))
-            print(results)
-            assert len(results) == self.rank
-            return np.array(results).reshape(-1)
+            def _in_range(v: float) -> bool:
+                return -6.0 <= v <= 6.0
+
+            # Preferred: indexed params anywhere in the response.
+            indexed = {}
+            for idx_s, val_s in re.findall(
+                r'params\s*\[\s*(\d+)\s*\]\s*[:=]\s*(' + number_pattern + r')',
+                input_text,
+                flags=re.IGNORECASE,
+            ):
+                idx = int(idx_s)
+                if 0 <= idx < self.rank:
+                    val = float(val_s)
+                    if _in_range(val):
+                        indexed[idx] = val
+
+            if len(indexed) == self.rank:
+                return np.array([indexed[i] for i in range(self.rank)], dtype=float).reshape(-1)
+
+            # Next best: dense params line such as "params: v1, v2, ...".
+            candidate_lines = []
+            for line in input_text.split("\n"):
+                if "params" in line.lower():
+                    vals = [float(x) for x in re.findall(number_pattern, line)]
+                    if len(vals) >= self.rank:
+                        candidate = vals[:self.rank]
+                        if all(_in_range(v) for v in candidate):
+                            candidate_lines.append(candidate)
+            if candidate_lines:
+                return np.array(candidate_lines[-1], dtype=float).reshape(-1)
+
+            # Final fallback: take the last rank numeric tokens from output.
+            all_vals = [float(x) for x in re.findall(number_pattern, input_text)]
+            bounded_vals = [v for v in all_vals if _in_range(v)]
+            if len(bounded_vals) >= self.rank:
+                return np.array(bounded_vals[-self.rank:], dtype=float).reshape(-1)
+
+            raise ValueError(
+                f"Could not parse {self.rank} parameters from model output. "
+                f"Only found {len(bounded_vals)} in-range decimal tokens."
+            )
         
         def parse_factor_matrices(input_text):
             """Parse L and/or U matrices from LLM output.
@@ -265,7 +298,110 @@ class LLMNumOptimAgent:
             current_section = None
             expected_L_cols = self.factor_rank
             expected_U_cols = self.policy.dim_actions
-            number_pattern = r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?'
+            # Strict decimal format only (no scientific notation like 1e-3).
+            number_pattern = r'(?<![A-Za-z0-9_.])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?![A-Za-z0-9_.])'
+
+            def _in_range(v: float) -> bool:
+                return -6.0 <= v <= 6.0
+
+            def _header_key(raw_line: str):
+                """Return section key only for explicit section headers.
+
+                This avoids falsely entering matrix mode on explanatory prose like
+                "... propose values for L matrix ...".
+                """
+                line_lower = raw_line.lower().strip()
+                line_lower = re.sub(r'^[\s\-\*`>#]+', '', line_lower)
+                # Strip common role/prefix tokens emitted by chatty local models.
+                line_lower = re.sub(
+                    r'^(?:assistant|final|answer|response|output)\s*[:\-]*\s*',
+                    '',
+                    line_lower,
+                )
+
+                # Match explicit headers while avoiding row lines like "L[0]: ...".
+                if (
+                    re.match(r'^l\s*matrix\b', line_lower)
+                    or re.match(r'^matrix\s*l\b', line_lower)
+                    or re.match(r'^lower\s*matrix\b', line_lower)
+                    or re.match(r'^l\s*[:=]\s*$', line_lower)
+                ):
+                    return 'L'
+                if (
+                    re.match(r'^u\s*matrix\b', line_lower)
+                    or re.match(r'^matrix\s*u\b', line_lower)
+                    or re.match(r'^upper\s*matrix\b', line_lower)
+                    or re.match(r'^u\s*[:=]\s*$', line_lower)
+                ):
+                    return 'U'
+                if line_lower.startswith('bias'):
+                    return 'bias'
+                return None
+
+            def _parse_fallback(reason: str):
+                """Deterministic fallback: keep current factors unchanged.
+
+                Parsing should succeed through robust extraction paths first.
+                This fallback only prevents crashes and does not introduce noise.
+                """
+                print(f"[Parser fallback] {reason}. Keeping current factors unchanged.")
+                return {
+                    'L': self.policy.L.copy(),
+                    'U': self.policy.U.copy(),
+                    'bias': self.policy.bias.copy(),
+                }
+
+            def _line_looks_like_row(raw_line: str) -> bool:
+                raw_lower = raw_line.lower()
+                return (
+                    ',' in raw_line
+                    or ';' in raw_line
+                    or '|' in raw_line
+                    or '[' in raw_line
+                    or raw_lower.startswith('l[')
+                    or raw_lower.startswith('u[')
+                    or bool(re.match(r'^\s*\d+\s*[:\)\-]', raw_line))
+                )
+
+            def _coerce_row(raw_line: str, values: list[float], expected_cols: int):
+                """Normalize model-emitted row variants into exactly expected_cols values.
+
+                Handles common formats like:
+                - L[3]: v1, ..., vN  (leading row index)
+                - 3: v1, ..., vN     (leading row index)
+                - rows with extra numeric prefixes/suffixes
+                """
+                if len(values) == expected_cols:
+                    return values
+
+                has_row_label = bool(
+                    re.search(r'(?i)(?:^|\s)[lu]\s*\[\s*\d+\s*\]\s*[:\-]?', raw_line)
+                    or re.search(r'^\s*\d+\s*[:\)\-]', raw_line)
+                )
+
+                if len(values) == expected_cols + 1 and has_row_label:
+                    return values[-expected_cols:]
+
+                if len(values) > expected_cols and _line_looks_like_row(raw_line):
+                    # Prefer the last expected_cols numbers; extra tokens are often row ids.
+                    return values[-expected_cols:]
+
+                return None
+
+            def _recover_matrix_from_value_stream(raw_text: str, expected_rows: int, expected_cols: int):
+                """Recover a matrix from free-form numeric text.
+
+                Uses bounded values (matching template constraints [-6, 6]) to avoid
+                pulling unrelated large numbers like iteration counts or rewards.
+                """
+                needed = expected_rows * expected_cols
+                all_vals = [float(x) for x in re.findall(number_pattern, raw_text)]
+                bounded_vals = [v for v in all_vals if _in_range(v)]
+                if len(bounded_vals) < needed:
+                    return None
+                tail = bounded_vals[-needed:]
+                matrix = [tail[i * expected_cols:(i + 1) * expected_cols] for i in range(expected_rows)]
+                return matrix
             
             for line in lines:
                 line = line.strip()
@@ -276,20 +412,20 @@ class LLMNumOptimAgent:
 
                 # Be permissive about matrix headers (markdown, missing colon, case variants,
                 # and local model prefixes like "assistantfinalU matrix:").
-                line_lower = line.lower()
-                if 'l matrix' in line_lower:
+                section_key = _header_key(line)
+                if section_key == 'L':
                     if current_section == 'L' and L_matrix:
                         L_blocks.append(L_matrix)
                         L_matrix = []
                     current_section = 'L'
                     continue
-                elif 'u matrix' in line_lower:
+                elif section_key == 'U':
                     if current_section == 'U' and U_matrix:
                         U_blocks.append(U_matrix)
                         U_matrix = []
                     current_section = 'U'
                     continue
-                elif 'bias' in line_lower:
+                elif section_key == 'bias':
                     current_section = 'bias'
                     continue
 
@@ -301,53 +437,106 @@ class LLMNumOptimAgent:
                     if not row_chunks:
                         row_chunks = [chunk for chunk in line.split(';') if chunk.strip()]
 
-                    parsed_any = False
+                    parsed_effective = False
                     for chunk in row_chunks:
                         numbers = re.findall(number_pattern, chunk)
                         if not numbers:
                             continue
-                        parsed_any = True
                         row = [float(x) for x in numbers]
 
                         # Validate row length before adding
                         if current_section == 'L':
                             if self.frozen_factor == 'L':
                                 pass  # Skip – L is frozen; LLM may still include it for reference
-                            elif len(row) == expected_L_cols:
-                                L_matrix.append(row)
                             else:
-                                print(f"Warning: Skipping L row with {len(row)} values (expected {expected_L_cols}): {row}")
+                                coerced = _coerce_row(line, row, expected_L_cols)
+                                if coerced is not None:
+                                    if all(_in_range(v) for v in coerced):
+                                        L_matrix.append(coerced)
+                                        parsed_effective = True
+                                    else:
+                                        print(
+                                            f"Warning: Skipping out-of-range L row (must be within [-6, 6]): {coerced}"
+                                        )
+                                elif _line_looks_like_row(line):
+                                    print(
+                                        f"Warning: Skipping L row with {len(row)} values "
+                                        f"(expected {expected_L_cols}): {row}"
+                                    )
                         elif current_section == 'U':
                             if self.frozen_factor == 'U':
                                 pass  # Skip – U is frozen
-                            elif len(row) == expected_U_cols:
-                                U_matrix.append(row)
                             else:
-                                print(f"Warning: Skipping U row with {len(row)} values (expected {expected_U_cols}): {row}")
+                                coerced = _coerce_row(line, row, expected_U_cols)
+                                if coerced is not None:
+                                    if all(_in_range(v) for v in coerced):
+                                        U_matrix.append(coerced)
+                                        parsed_effective = True
+                                    else:
+                                        print(
+                                            f"Warning: Skipping out-of-range U row (must be within [-6, 6]): {coerced}"
+                                        )
+                                elif _line_looks_like_row(line):
+                                    print(
+                                        f"Warning: Skipping U row with {len(row)} values "
+                                        f"(expected {expected_U_cols}): {row}"
+                                    )
                         elif current_section == 'bias':
-                            bias_vector.extend(row)
+                            if all(_in_range(v) for v in row):
+                                bias_vector.extend(row)
+                                parsed_effective = True
+                            else:
+                                print(
+                                    f"Warning: Skipping out-of-range bias values (must be within [-6, 6]): {row}"
+                                )
 
-                    # If no bracket/semicolon chunks were parseable, parse raw line once.
-                    if not parsed_any:
+                    # If chunk parsing did not yield a usable row/value, parse raw line once.
+                    # This fixes patterns like: L[0]: 0.12, -0.44, ... (only [0] is bracketed).
+                    if not parsed_effective:
                         numbers = re.findall(number_pattern, line)
                         if numbers:
                             row = [float(x) for x in numbers]
                             if current_section == 'L':
                                 if self.frozen_factor == 'L':
                                     pass
-                                elif len(row) == expected_L_cols:
-                                    L_matrix.append(row)
                                 else:
-                                    print(f"Warning: Skipping L row with {len(row)} values (expected {expected_L_cols}): {row}")
+                                    coerced = _coerce_row(line, row, expected_L_cols)
+                                    if coerced is not None:
+                                        if all(_in_range(v) for v in coerced):
+                                            L_matrix.append(coerced)
+                                        else:
+                                            print(
+                                                f"Warning: Skipping out-of-range L row (must be within [-6, 6]): {coerced}"
+                                            )
+                                    elif _line_looks_like_row(line):
+                                        print(
+                                            f"Warning: Skipping L row with {len(row)} values "
+                                            f"(expected {expected_L_cols}): {row}"
+                                        )
                             elif current_section == 'U':
                                 if self.frozen_factor == 'U':
                                     pass
-                                elif len(row) == expected_U_cols:
-                                    U_matrix.append(row)
                                 else:
-                                    print(f"Warning: Skipping U row with {len(row)} values (expected {expected_U_cols}): {row}")
+                                    coerced = _coerce_row(line, row, expected_U_cols)
+                                    if coerced is not None:
+                                        if all(_in_range(v) for v in coerced):
+                                            U_matrix.append(coerced)
+                                        else:
+                                            print(
+                                                f"Warning: Skipping out-of-range U row (must be within [-6, 6]): {coerced}"
+                                            )
+                                    elif _line_looks_like_row(line):
+                                        print(
+                                            f"Warning: Skipping U row with {len(row)} values "
+                                            f"(expected {expected_U_cols}): {row}"
+                                        )
                             elif current_section == 'bias':
-                                bias_vector.extend(row)
+                                if all(_in_range(v) for v in row):
+                                    bias_vector.extend(row)
+                                else:
+                                    print(
+                                        f"Warning: Skipping out-of-range bias values (must be within [-6, 6]): {row}"
+                                    )
             
             if current_section == 'L' and L_matrix:
                 L_blocks.append(L_matrix)
@@ -368,6 +557,48 @@ class LLMNumOptimAgent:
                 chosen_U = valid_U_blocks[-1] if valid_U_blocks else U_blocks[-1]
                 U_matrix = chosen_U[-expected_U_rows:]
 
+            # Headerless fallback: if the model omitted matrix headers, recover
+            # rows directly from numeric lines matching expected column counts.
+            def _extract_rows_without_headers(expected_cols: int):
+                rows = []
+                for raw_line in lines:
+                    nums = re.findall(number_pattern, raw_line)
+                    if not nums:
+                        continue
+                    row_vals = [float(x) for x in nums]
+                    coerced = _coerce_row(raw_line, row_vals, expected_cols)
+                    if coerced is not None and all(_in_range(v) for v in coerced):
+                        rows.append(coerced)
+                return rows
+
+            if self.frozen_factor != 'L' and len(L_matrix) < expected_L_rows:
+                fallback_L_rows = _extract_rows_without_headers(expected_L_cols)
+                if len(fallback_L_rows) >= expected_L_rows:
+                    L_matrix = fallback_L_rows[-expected_L_rows:]
+
+            if self.frozen_factor != 'U' and len(U_matrix) < expected_U_rows:
+                fallback_U_rows = _extract_rows_without_headers(expected_U_cols)
+                if len(fallback_U_rows) >= expected_U_rows:
+                    U_matrix = fallback_U_rows[-expected_U_rows:]
+
+            # Final fallback: recover rows from bounded numeric stream when the
+            # model omits row delimiters or section headers entirely.
+            if self.frozen_factor != 'L' and len(L_matrix) < expected_L_rows:
+                recovered_L = _recover_matrix_from_value_stream(
+                    input_text, expected_L_rows, expected_L_cols
+                )
+                if recovered_L is not None:
+                    print("[Parser] Recovered L matrix from bounded numeric stream fallback.")
+                    L_matrix = recovered_L
+
+            if self.frozen_factor != 'U' and len(U_matrix) < expected_U_rows:
+                recovered_U = _recover_matrix_from_value_stream(
+                    input_text, expected_U_rows, expected_U_cols
+                )
+                if recovered_U is not None:
+                    print("[Parser] Recovered U matrix from bounded numeric stream fallback.")
+                    U_matrix = recovered_U
+
             print(f"Parsed {len(L_matrix)} L rows, {len(U_matrix)} U rows (frozen_factor={self.frozen_factor!r})")
             
             # For frozen matrices, use the current policy values unchanged
@@ -379,7 +610,7 @@ class LLMNumOptimAgent:
                 except ValueError as e:
                     print(f"ERROR creating L matrix: {e}")
                     print(f"L_matrix content: {L_matrix}")
-                    return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+                    return _parse_fallback("Could not construct L matrix from parsed rows")
             
             if self.frozen_factor == 'U':
                 U = self.policy.U.copy()
@@ -389,7 +620,7 @@ class LLMNumOptimAgent:
                 except ValueError as e:
                     print(f"ERROR creating U matrix: {e}")
                     print(f"U_matrix content: {U_matrix}")
-                    return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+                    return _parse_fallback("Could not construct U matrix from parsed rows")
             
             bias = np.array(bias_vector).reshape(1, -1) if bias_vector else self.policy.bias
             
@@ -403,13 +634,13 @@ class LLMNumOptimAgent:
                 print(f"ERROR: L matrix has wrong shape {L.shape}, expected {expected_L_shape}")
                 if self.frozen_factor != 'L':
                     print(f"LLM provided {len(L_matrix)} rows, expected {expected_L_shape[0]} rows with {expected_L_shape[1]} columns each")
-                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+                return _parse_fallback("Parsed L shape mismatch")
             
             if U.shape != expected_U_shape:
                 print(f"ERROR: U matrix has wrong shape {U.shape}, expected {expected_U_shape}")
                 if self.frozen_factor != 'U':
                     print(f"LLM provided {len(U_matrix)} rows, expected {expected_U_shape[0]} rows with {expected_U_shape[1]} columns each")
-                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+                return _parse_fallback("Parsed U shape mismatch")
             
             print(f"✓ Shapes validated correctly")
             if self.frozen_factor != 'L':
@@ -457,12 +688,25 @@ class LLMNumOptimAgent:
             
             if len(replay_buffer.buffer) == 0:
                 return preamble + "(No previous attempts yet)\n"
+
+            all_examples = list(replay_buffer.buffer)
+            total_examples = len(all_examples)
+            if total_examples > max_prompt_examples:
+                selected_examples = all_examples[-max_prompt_examples:]
+                omitted = total_examples - max_prompt_examples
+            else:
+                selected_examples = all_examples
+                omitted = 0
             
             text = preamble
-            text += f"Total previous attempts: {len(replay_buffer.buffer)}\n"
+            text += (
+                f"Total previous attempts: {total_examples} "
+                f"(showing last {len(selected_examples)}, omitted {omitted})\n"
+            )
             text += "=" * 60 + "\n\n"
             
-            for idx, (weights, reward) in enumerate(replay_buffer.buffer, 1):
+            start_idx = total_examples - len(selected_examples) + 1
+            for idx, (weights, reward) in enumerate(selected_examples, start=start_idx):
                 # weights should be a dict with L, U, bias
                 if isinstance(weights, dict) and 'L' in weights:
                     L = weights['L']
@@ -490,46 +734,63 @@ class LLMNumOptimAgent:
 
         # Update the policy using llm_brain, q_table and replay_buffer
         print("Updating the policy...")
+        update_applied = True
         
         if self.use_factorized_policy:
             # Two-matrix policy: LLM generates L and/or U, policy = L @ U
-            new_factor_components, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
-                str_factor_examples(self.replay_buffer),
-                parse_factor_matrices,
-                self.training_episodes,
-                self.rank,
-                self.optimum,
-                self.search_step_size,
-                dim_state=self.policy.dim_states,
-                dim_action=self.policy.dim_actions,
-                factor_rank=self.factor_rank,
-                use_factorized=True,
-                frozen_factor=self.frozen_factor,
-            )
-            self.api_call_time += api_time
-            
-            print(f"L shape: {new_factor_components['L'].shape}, U shape: {new_factor_components['U'].shape}")
-            self.policy.update_policy(factor_components=new_factor_components)
-            print(f"Weight shape after update: {self.policy.weight.shape}")
-            
-            # Store factor components for replay buffer
-            new_parameter_list = new_factor_components
+            try:
+                new_factor_components, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                    str_factor_examples(self.replay_buffer),
+                    parse_factor_matrices,
+                    self.training_episodes,
+                    self.rank,
+                    self.optimum,
+                    self.search_step_size,
+                    dim_state=self.policy.dim_states,
+                    dim_action=self.policy.dim_actions,
+                    factor_rank=self.factor_rank,
+                    use_factorized=True,
+                    frozen_factor=self.frozen_factor,
+                )
+                self.api_call_time += api_time
+                
+                print(f"L shape: {new_factor_components['L'].shape}, U shape: {new_factor_components['U'].shape}")
+                self.policy.update_policy(factor_components=new_factor_components)
+                print(f"Weight shape after update: {self.policy.weight.shape}")
+                
+                # Store factor components for replay buffer
+                new_parameter_list = new_factor_components
+            except ValueError as e:
+                update_applied = False
+                reasoning = f"Skipped update due to invalid LLM output: {e}"
+                new_parameter_list = {
+                    'L': self.policy.L.copy(),
+                    'U': self.policy.U.copy(),
+                    'bias': self.policy.bias.copy(),
+                }
+                print(f"[Parser validation] {reasoning}")
         else:
             # Use regular parameter optimization
-            new_parameter_list, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
-                str_nd_examples(self.replay_buffer, self.rank),
-                parse_parameters,
-                self.training_episodes,
-                self.rank,
-                self.optimum,
-                self.search_step_size
-            )
-            self.api_call_time += api_time
+            try:
+                new_parameter_list, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                    str_nd_examples(self.replay_buffer, self.rank),
+                    parse_parameters,
+                    self.training_episodes,
+                    self.rank,
+                    self.optimum,
+                    self.search_step_size
+                )
+                self.api_call_time += api_time
 
-            print(self.policy.get_parameters().shape)
-            print(new_parameter_list.shape)
-            self.policy.update_policy(new_parameter_list)
-            print(self.policy.get_parameters().shape)
+                print(self.policy.get_parameters().shape)
+                print(new_parameter_list.shape)
+                self.policy.update_policy(new_parameter_list)
+                print(self.policy.get_parameters().shape)
+            except ValueError as e:
+                update_applied = False
+                new_parameter_list = np.array(self.policy.get_parameters(), dtype=float).reshape(-1)
+                reasoning = f"Skipped update due to invalid LLM output: {e}"
+                print(f"[Parser validation] {reasoning}")
         
         logging_q_filename = f"{logdir}/parameters.txt"
         logging_q_file = open(logging_q_filename, "w")
@@ -539,7 +800,10 @@ class LLMNumOptimAgent:
         q_reasoning_file = open(q_reasoning_filename, "w")
         q_reasoning_file.write(reasoning)
         q_reasoning_file.close()
-        print("Policy updated!")
+        if update_applied:
+            print("Policy updated!")
+        else:
+            print("Policy update skipped for this episode.")
 
         # Run the episode and collect the trajectory
         print(f"Rolling out episode {self.training_episodes}...")

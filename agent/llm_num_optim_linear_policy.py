@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import platform
+from collections import deque
 
 # Enable headless rendering for video recording on servers without display
 # Only use 'egl' on Linux; Windows uses 'glfw' by default
@@ -107,6 +108,55 @@ class LLMNumOptimAgent:
 
         if self.bias:
             self.dim_state += 1
+
+    def _is_groq_mode(self) -> bool:
+        return getattr(self.llm_brain, "model_group", None) == "groq"
+
+    def _select_prompt_replay_entries(self, replay_buffer: EpisodeRewardBufferNoBias):
+        """Select replay entries for prompting.
+
+        For Groq, keep only the latest 4 entries and the top 3 by reward.
+        For other providers, keep the full replay buffer.
+        """
+        entries = list(replay_buffer.buffer)
+        if not self._is_groq_mode() or len(entries) <= 7:
+            return entries
+
+        recent_keep = 4
+        best_keep = 3
+        total = len(entries)
+
+        recent_indices = set(range(max(0, total - recent_keep), total))
+
+        scored_indices = []
+        for idx, entry in enumerate(entries):
+            reward = float("-inf")
+            if isinstance(entry, (tuple, list)) and len(entry) >= 2:
+                try:
+                    reward = float(entry[1])
+                except Exception:
+                    reward = float("-inf")
+            scored_indices.append((reward, idx))
+
+        scored_indices.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        best_indices = {idx for _, idx in scored_indices[:best_keep]}
+
+        selected_indices = sorted(recent_indices | best_indices)
+        return [entries[idx] for idx in selected_indices]
+
+    def _prune_replay_buffer_for_groq(self):
+        """Keep replay buffer aligned with Groq prompt budget policy."""
+        if not self._is_groq_mode():
+            return
+
+        selected_entries = self._select_prompt_replay_entries(self.replay_buffer)
+        if len(selected_entries) == len(self.replay_buffer.buffer):
+            return
+
+        self.replay_buffer.buffer = deque(
+            selected_entries,
+            maxlen=self.replay_buffer.buffer.maxlen,
+        )
 
     def rollout_episode(self, world: BaseWorld, logging_file, record=True):
         # Ensure deterministic behavior for this episode
@@ -218,7 +268,7 @@ class LLMNumOptimAgent:
             # Run the episode and collect the trajectory
             print(f"Rolling out warmup episode {episode}...")
             logging_filename = f"{logdir}/warmup_rollout_{episode}.txt"
-            logging_file = open(logging_filename, "w")
+            logging_file = open(logging_filename, "w", encoding="utf-8")
             result = self.rollout_episode(world, logging_file)
             print(f"Result: {result}")
             
@@ -255,6 +305,26 @@ class LLMNumOptimAgent:
             When self.frozen_factor is None, both L and U are parsed.
             """
             lines = input_text.strip().split('\n')
+
+            def detect_section(raw_line):
+                """Detect which section a line denotes (L/U/bias) with flexible heading support."""
+                if not raw_line:
+                    return None
+                normalized = raw_line.strip().lower()
+                # Remove common markdown prefixes/suffixes and emphasis wrappers.
+                normalized = re.sub(r'^[#>*\-\s]+', '', normalized)
+                normalized = normalized.strip('`*_ ')
+
+                heading_prefix = r'(?:optimized|updated|new|candidate|final|proposed|fixed|frozen)?\s*'
+                heading_suffix = r'(?:\s*\([^\)]*\))?\s*[:=-]?\s*$'
+
+                if re.match(r'^' + heading_prefix + r'l(?:\s+matrix)?' + heading_suffix, normalized):
+                    return 'L'
+                if re.match(r'^' + heading_prefix + r'u(?:\s+matrix)?' + heading_suffix, normalized):
+                    return 'U'
+                if re.match(r'^' + heading_prefix + r'bias(?:\s+vector)?' + heading_suffix, normalized):
+                    return 'bias'
+                return None
             
             L_matrix = []
             U_matrix = []
@@ -266,14 +336,9 @@ class LLMNumOptimAgent:
             
             for line in lines:
                 line = line.strip()
-                if 'L matrix:' in line or 'L Matrix:' in line:
-                    current_section = 'L'
-                    continue
-                elif 'U matrix:' in line or 'U Matrix:' in line:
-                    current_section = 'U'
-                    continue
-                elif 'Bias:' in line or 'bias:' in line:
-                    current_section = 'bias'
+                detected_section = detect_section(line)
+                if detected_section is not None:
+                    current_section = detected_section
                     continue
                 elif 'Explanation:' in line or 'explanation:' in line or line.startswith('Note:'):
                     break
@@ -281,7 +346,7 @@ class LLMNumOptimAgent:
                 # Parse numerical values
                 if current_section and line and not line.startswith('Explanation') and not line.startswith('Note'):
                     # Extract numbers from the line (including negative numbers and decimals)
-                    numbers = re.findall(r'[+-]?\d+(?:\.\d+)?', line)
+                    numbers = re.findall(r'[+-]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][+-]?\d+)?', line)
                     if numbers:
                         row = [float(x) for x in numbers]
                         
@@ -355,13 +420,15 @@ class LLMNumOptimAgent:
             return {'L': L, 'U': U, 'bias': bias}
 
         def str_nd_examples(replay_buffer: EpisodeRewardBufferNoBias, n):
-
+            selected_entries = self._select_prompt_replay_entries(replay_buffer)
             all_parameters = []
-            for weights, reward in replay_buffer.buffer:
+            for weights, reward in selected_entries:
                 parameters = weights
                 all_parameters.append((parameters.reshape(-1), reward))
 
             text = ""
+            if self._is_groq_mode() and len(selected_entries) > 0:
+                text += "(Groq mode) Showing latest 4 attempts + top 3 historical rewards.\n"
             for parameters, reward in all_parameters:
                 l = ""
                 for i in range(n):
@@ -390,14 +457,18 @@ class LLMNumOptimAgent:
                     preamble += ", ".join([f"{x:.2f}" for x in row]) + "\n"
                 preamble += "\n"
             
-            if len(replay_buffer.buffer) == 0:
+            selected_entries = self._select_prompt_replay_entries(replay_buffer)
+
+            if len(selected_entries) == 0:
                 return preamble + "(No previous attempts yet)\n"
             
             text = preamble
-            text += f"Total previous attempts: {len(replay_buffer.buffer)}\n"
+            if self._is_groq_mode():
+                text += "(Groq mode) Showing latest 4 attempts + top 3 historical rewards.\n"
+            text += f"Total previous attempts shown: {len(selected_entries)}\n"
             text += "=" * 60 + "\n\n"
             
-            for idx, (weights, reward) in enumerate(replay_buffer.buffer, 1):
+            for idx, (weights, reward) in enumerate(selected_entries, 1):
                 # weights should be a dict with L, U, bias
                 if isinstance(weights, dict) and 'L' in weights:
                     L = weights['L']
@@ -424,6 +495,7 @@ class LLMNumOptimAgent:
             return text
 
         # Update the policy using llm_brain, q_table and replay_buffer
+        self._prune_replay_buffer_for_groq()
         print("Updating the policy...")
         
         if self.use_factorized_policy:
@@ -467,11 +539,11 @@ class LLMNumOptimAgent:
             print(self.policy.get_parameters().shape)
         
         logging_q_filename = f"{logdir}/parameters.txt"
-        logging_q_file = open(logging_q_filename, "w")
+        logging_q_file = open(logging_q_filename, "w", encoding="utf-8")
         logging_q_file.write(str(self.policy))
         logging_q_file.close()
         q_reasoning_filename = f"{logdir}/parameters_reasoning.txt"
-        q_reasoning_file = open(q_reasoning_filename, "w")
+        q_reasoning_file = open(q_reasoning_filename, "w", encoding="utf-8")
         q_reasoning_file.write(reasoning)
         q_reasoning_file.close()
         print("Policy updated!")
@@ -479,7 +551,7 @@ class LLMNumOptimAgent:
         # Run the episode and collect the trajectory
         print(f"Rolling out episode {self.training_episodes}...")
         logging_filename = f"{logdir}/training_rollout.txt"
-        logging_file = open(logging_filename, "w")
+        logging_file = open(logging_filename, "w", encoding="utf-8")
         results = []
         for idx in range(self.num_evaluation_episodes):
             if idx == 0:
@@ -493,6 +565,7 @@ class LLMNumOptimAgent:
         std = np.std(results)
         print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
         self.replay_buffer.add(new_parameter_list, result)
+        self._prune_replay_buffer_for_groq()
         
         # Track training rewards only
         self.training_rewards.append(result)
@@ -744,7 +817,7 @@ class LLMNumOptimAgent:
         results = []
         for idx in range(self.num_evaluation_episodes):
             logging_filename = f"{logdir}/evaluation_rollout_{idx}.txt"
-            logging_file = open(logging_filename, "w")
+            logging_file = open(logging_filename, "w", encoding="utf-8")
             result = self.rollout_episode(world, logging_file, record=False)
             results.append(result)
         return results

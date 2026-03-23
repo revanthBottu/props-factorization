@@ -9,6 +9,7 @@ jinja2
 Pillow
 scipy
 google-genai
+openai
 ollama
 transformers
 moviepy

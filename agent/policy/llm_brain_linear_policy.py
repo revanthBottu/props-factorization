@@ -6,12 +6,18 @@ import os
 import time
 import gc
 from jinja2 import Template
-# from openai import OpenAI
 from dotenv import load_dotenv
 from google import genai
 # import anthropic
 import time
 import torch
+
+try:
+    from openai import OpenAI
+    OPENAI_CLIENT_AVAILABLE = True
+except ImportError:
+    OPENAI_CLIENT_AVAILABLE = False
+    print("Warning: openai package not installed. OpenAI-compatible models (e.g., Groq) won't be available.")
 
 try:
     from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig, BitsAndBytesConfig
@@ -42,14 +48,39 @@ class LLMBrain:
         self.use_cuda = False  # Track if we're using CUDA
         self.hf_input_device = "cpu"
         
+        llm_model_name_lower = llm_model_name.lower()
+
+        # Detect explicit provider prefixes before generic slash-based routing.
+        is_ollama_prefixed = llm_model_name_lower.startswith("ollama/")
+
+        # Detect Groq models first so provider-prefixed model names are never
+        # routed to HuggingFace/local execution paths.
+        known_groq_models = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "deepseek-r1-distill-llama-70b",
+            "mixtral-8x7b-32768",
+            "gemma2-9b-it",
+            # Groq-hosted OpenAI OSS model ids
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+        ]
+        is_groq_model = llm_model_name_lower.startswith("groq/") or llm_model_name_lower in known_groq_models
+
         # Detect if this is a HuggingFace model (contains / indicating org/model format)
         # HuggingFace paths: "Qwen/Qwen3.5-72B-Instruct", "meta-llama/Llama-3.1-70B", etc.
-        is_hf_model = "/" in llm_model_name
+        # Exclude Groq and explicit Ollama provider-prefixed models.
+        is_hf_model = (not is_groq_model) and (not is_ollama_prefixed) and ("/" in llm_model_name)
         
         # Detect if this is an Ollama model (model:version format or common local model names)
         # Ollama examples: "llama3:70b", "qwen:14b", "mistral:latest"
-        is_ollama_model = (not is_hf_model) and (":" in llm_model_name or any(llm_model_name.lower().startswith(prefix) for prefix in 
-                                                       ["llama", "qwen", "mistral", "phi", "gemma", "codellama"]))
+        is_ollama_model = is_ollama_prefixed or ((not is_hf_model and not is_groq_model) and (
+            ":" in llm_model_name
+            or any(
+                llm_model_name_lower.startswith(prefix)
+                for prefix in ["llama", "qwen", "mistral", "phi", "gemma", "codellama", "gpt-oss"]
+            )
+        ))
         
         known_models = [
             "o1-preview",
@@ -69,8 +100,10 @@ class LLMBrain:
             "claude-3-7-sonnet-20250219",
         ]
         
-        if not is_hf_model and not is_ollama_model:
-            assert llm_model_name in known_models, f"Unknown model: {llm_model_name}. Use a known model, an Ollama model, or a HuggingFace model."
+        if not is_hf_model and not is_ollama_model and not is_groq_model:
+            assert llm_model_name in known_models, (
+                f"Unknown model: {llm_model_name}. Use a known model, an Ollama model, a Groq model, or a HuggingFace model."
+            )
         
         self.llm_model_name = llm_model_name
         
@@ -178,8 +211,25 @@ class LLMBrain:
             if not OLLAMA_AVAILABLE:
                 raise ImportError("Ollama package not installed. Install with: pip install ollama")
             self.model_group = "ollama"
-            self.ollama_client = ollama.Client()
-            print(f"Using Ollama model: {llm_model_name}")
+            self.ollama_model_name = llm_model_name.split("/", 1)[1] if is_ollama_prefixed else llm_model_name
+            ollama_host = os.environ.get("OLLAMA_HOST")
+            self.ollama_client = ollama.Client(host=ollama_host) if ollama_host else ollama.Client()
+            print(f"Using Ollama model: {self.ollama_model_name}")
+        elif is_groq_model:
+            if not OPENAI_CLIENT_AVAILABLE:
+                raise ImportError("openai package not installed. Install with: pip install openai")
+
+            groq_api_key = os.environ.get("GROQ_API_KEY")
+            if not groq_api_key:
+                raise ValueError("Missing GROQ_API_KEY in environment.")
+
+            self.model_group = "groq"
+            self.groq_model_name = llm_model_name.split("/", 1)[1] if llm_model_name_lower.startswith("groq/") else llm_model_name
+            self.groq_client = OpenAI(
+                api_key=groq_api_key,
+                base_url=os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+            )
+            print(f"Using Groq model: {self.groq_model_name}")
         elif "gemini" in llm_model_name:
             self.model_group = "gemini"
             # get env gemini keys into list
@@ -212,6 +262,10 @@ class LLMBrain:
             self.current_gemini_key_index = (self.current_gemini_key_index + 1) % len(self.gemini_api_keys)
             self.gemini_client = genai.Client(api_key=self.gemini_api_keys[self.current_gemini_key_index])
             print(f"Switched to Gemini API key #{self.current_gemini_key_index + 1}")
+
+    def _assistant_role_name(self):
+        """Return the provider-specific assistant role label."""
+        return "model" if self.model_group == "gemini" else "assistant"
     
     def _format_hf_chat(self):
         """Format conversation history for HuggingFace chat models"""
@@ -389,6 +443,8 @@ class LLMBrain:
             self.llm_conversation.append({"role": role, "content": text})
         elif self.model_group == "ollama":
             self.llm_conversation.append({"role": role, "content": text})
+        elif self.model_group == "groq":
+            self.llm_conversation.append({"role": role, "content": text})
 
     def query_llm(self):
         for attempt in range(10):
@@ -423,10 +479,16 @@ class LLMBrain:
                 elif self.model_group == "ollama":
                     # Use Ollama for local models
                     response = self.ollama_client.chat(
-                        model=self.llm_model_name,
+                        model=self.ollama_model_name,
                         messages=self.llm_conversation
                     )
                     response = self._normalize_local_response(response['message']['content'])
+                elif self.model_group == "groq":
+                    completion = self.groq_client.chat.completions.create(
+                        model=self.groq_model_name,
+                        messages=self.llm_conversation,
+                    )
+                    response = completion.choices[0].message.content or ""
             except Exception as e:
                 print(f"Error: {e}")
                 
@@ -440,7 +502,7 @@ class LLMBrain:
                 if attempt == 9:
                     raise Exception("Failed to get response from LLM after 10 attempts")
                 else:
-                    print("Gemini charging up...")
+                    print("LLM provider charging up...")
                     time.sleep(60)
                     continue
 
@@ -448,12 +510,7 @@ class LLMBrain:
             #     # add the response to self.llm_conversation
             #     self.add_llm_conversation(response, "assistant")
             # else:
-            if self.model_group == "gemini":
-                self.add_llm_conversation(response, "model")
-            elif self.model_group == "huggingface":
-                self.add_llm_conversation(response, "assistant")
-            elif self.model_group == "ollama":
-                self.add_llm_conversation(response, "assistant")
+            self.add_llm_conversation(response, self._assistant_role_name())
 
             return response
         
@@ -506,13 +563,22 @@ class LLMBrain:
                     responses = []
                     for _ in range(num_responses):
                         response = self.ollama_client.chat(
-                            model=self.llm_model_name,
+                            model=self.ollama_model_name,
                             messages=self.llm_conversation,
                             options={"temperature": temperature}
                         )
                         responses.append(
                             self._normalize_local_response(response['message']['content'])
                         )
+                elif self.model_group == "groq":
+                    responses = []
+                    for _ in range(num_responses):
+                        completion = self.groq_client.chat.completions.create(
+                            model=self.groq_model_name,
+                            messages=self.llm_conversation,
+                            temperature=temperature,
+                        )
+                        responses.append(completion.choices[0].message.content or "")
 
             except Exception as e:
                 print(f"Error: {e}")
@@ -561,10 +627,7 @@ class LLMBrain:
         self.add_llm_conversation(system_prompt, "user")
         new_parameters_with_reasoning = self.query_llm()
 
-        if self.model_group == "openai":
-            self.add_llm_conversation(new_parameters_with_reasoning, "assistant")
-        else:
-            self.add_llm_conversation(new_parameters_with_reasoning, "model")
+        self.add_llm_conversation(new_parameters_with_reasoning, self._assistant_role_name())
         self.add_llm_conversation(
             self.llm_output_conversion_template.render(),
             "user",
@@ -590,7 +653,7 @@ class LLMBrain:
 
         print(system_prompt)
 
-        self.add_llm_conversation(new_parameters_with_reasoning, "assistant")
+        self.add_llm_conversation(new_parameters_with_reasoning, self._assistant_role_name())
         self.add_llm_conversation(
             self.llm_output_conversion_template.render(),
             "user",

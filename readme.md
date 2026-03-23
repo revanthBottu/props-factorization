@@ -23,11 +23,50 @@ In this paper, we demonstrate that:
 
 ## Install the LLM APIs
 
-We utilized the standard Google Gemini, Openai, and Anthropic APIs. Please install the packages accordingly.
+We utilized the standard Google Gemini, OpenAI-compatible APIs, and Anthropic APIs. Please install the packages accordingly.
 
 - `https://ai.google.dev/gemini-api/docs`
 - `https://platform.openai.com/docs/overview`
+- `https://console.groq.com/docs/overview`
 - `https://docs.anthropic.com/en/release-notes/api`
+
+### Groq Models
+
+Groq models are supported through an OpenAI-compatible client.
+
+- Set `GROQ_API_KEY` in your environment or `.env`
+- Optionally set `GROQ_BASE_URL` (defaults to `https://api.groq.com/openai/v1`)
+- In config, set `llm_model_name` to either:
+	- `groq/llama-3.3-70b-versatile` (recommended explicit provider prefix)
+	- `llama-3.3-70b-versatile` (also supported)
+
+### Ollama Local Models
+
+Ollama models are supported for local inference.
+
+- Install and run Ollama from `https://ollama.com/`
+- Pull one or more local models, for example:
+	- `ollama pull llama3.2:latest`
+	- `ollama pull qwen2.5:7b`
+- Make sure the Python package is installed (already listed in `requirements.txt`):
+	- `pip install ollama`
+- In config, set `llm_model_name` to either:
+	- `ollama/llama3.2:latest` (recommended explicit provider prefix)
+	- `llama3.2:latest` (also supported)
+
+Optional:
+- If Ollama is running on a non-default host, set `OLLAMA_HOST` (for example `http://127.0.0.1:11434`).
+
+Quick local test configs:
+- `configs/cartpole/cartpole_lu_ollama_llama32_test.yaml`
+- `configs/cartpole/cartpole_lu_ollama_phi3_test.yaml`
+- `configs/cartpole/cartpole_lu_ollama_deepseek15b_test.yaml`
+- `configs/cartpole/cartpole_lu_ollama_qwen25_test.yaml`
 
 ## Start Training
 In order to run an experiment, please run `python main.py --config <configuration_file>`.
+
+Examples:
+- `python main.py --config configs/cartpole/cartpole_lu_ollama_llama32_test.yaml`
+- `python main.py --config configs/cartpole/cartpole_lu_ollama_phi3_test.yaml`
+- `python main.py --config configs/cartpole/cartpole_lu_ollama_deepseek15b_test.yaml`

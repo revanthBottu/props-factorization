@@ -806,8 +806,11 @@ class LLMBrain:
         factor_rank=None,
         use_factorized=False,
         frozen_factor=None,
+        schedule_context=None,
     ):
         self.reset_llm_conversation()
+
+        schedule_context = schedule_context or {}
 
         system_prompt = self.llm_si_template.render(
             {
@@ -821,6 +824,12 @@ class LLMBrain:
                 "dim_action": dim_action,
                 "factor_rank": factor_rank,
                 "frozen_factor": frozen_factor,
+                "lu_schedule_enabled": bool(schedule_context.get("enabled", False)),
+                "lu_schedule_phase": schedule_context.get("phase"),
+                "lu_schedule_l_episodes": schedule_context.get("l_episodes"),
+                "lu_schedule_u_iterations": schedule_context.get("u_iterations"),
+                "lu_schedule_cycle_step": schedule_context.get("cycle_step"),
+                "lu_schedule_cycle_length": schedule_context.get("cycle_length"),
             }
         )
 

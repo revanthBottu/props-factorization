@@ -12,6 +12,17 @@ Where:
 
 The actual policy used is the matrix product **params = L @ U**.
 
+{% if lu_schedule_enabled %}
+# Alternating LU Schedule (Enabled)
+You must follow this exact repeating cycle:
+1. Update **L** for **{{ lu_schedule_l_episodes }}** iterations while **U is frozen**.
+2. Then update **U** for **{{ lu_schedule_u_iterations }}** iterations while **L is frozen**.
+3. Repeat this cycle.
+
+Current cycle position: step {{ lu_schedule_cycle_step }} of {{ lu_schedule_cycle_length }}.
+Current phase: **{{ lu_schedule_phase }}**.
+{% endif %}
+
 {% if frozen_factor == 'L' %}
 **L is FIXED and will NOT change.** Its values are provided in the examples below.
 You will only propose values for **U** (and bias).
@@ -46,10 +57,13 @@ Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} 
 1. **Do not propose previously seen {% if frozen_factor == 'L' %}U matrices{% elif frozen_factor == 'U' %}L matrices{% else %}matrices{% endif %}.**
 2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. You should explore along with exploiting.
 3. Search both positive and negative values. **During exploration, use search step size of {{ step_size }}**.
+{% if lu_schedule_enabled %}
+4. **Strictly follow the active schedule phase above.** In this step, only update the currently allowed matrix and keep the other matrix unchanged.
+{% endif %}
 {% if frozen_factor %}
-4. **The fixed matrix multiplies your proposed matrix.** Consider the structure of the fixed matrix when choosing values.
+5. **The fixed matrix multiplies your proposed matrix.** Consider the structure of the fixed matrix when choosing values.
 {% else %}
-4. **Small changes in L or U can cause large changes in params = L @ U** due to matrix multiplication. Generally, make small adjustments to L and U to explore the parameter space effectively and avoid losing reward progress.
+5. **Small changes in L or U can cause large changes in params = L @ U** due to matrix multiplication. Generally, make small adjustments to L and U to explore the parameter space effectively and avoid losing reward progress.
 {% endif %}
 
 # Important

@@ -45,6 +45,9 @@ class LLMNumOptimAgent:
         use_factorized_policy=False,
         factor_rank=None,
         frozen_factor=None,
+        enable_alternating_lu_schedule: bool = False,
+        lu_schedule_l_episodes: int = 5,
+        lu_schedule_u_iterations: int = 3,
         seed: int = None,
     ):
         self.start_time = time.process_time()
@@ -60,6 +63,14 @@ class LLMNumOptimAgent:
         # Which factor to keep frozen: 'L', 'U', or None (both updated)
         assert frozen_factor in (None, 'L', 'U'), f"frozen_factor must be None, 'L', or 'U', got: {frozen_factor!r}"
         self.frozen_factor = frozen_factor
+        self.enable_alternating_lu_schedule = bool(enable_alternating_lu_schedule)
+        self.lu_schedule_l_episodes = int(lu_schedule_l_episodes)
+        self.lu_schedule_u_iterations = int(lu_schedule_u_iterations)
+        if self.enable_alternating_lu_schedule:
+            if not self.use_factorized_policy:
+                raise ValueError("enable_alternating_lu_schedule requires use_factorized_policy=True")
+            if self.lu_schedule_l_episodes <= 0 or self.lu_schedule_u_iterations <= 0:
+                raise ValueError("lu_schedule_l_episodes and lu_schedule_u_iterations must both be positive integers")
         # Deterministic seed for episode rollouts. If None, default to 42.
         self.seed = seed if seed is not None else 42
 
@@ -282,6 +293,8 @@ class LLMNumOptimAgent:
 
     def train_policy(self, world: BaseWorld, logdir):
 
+        effective_frozen_factor = self.frozen_factor
+
         def parse_parameters(input_text):
             # This regex looks for integers or floating-point numbers (including optional sign)
             s = input_text.split("\n")[0]
@@ -300,9 +313,9 @@ class LLMNumOptimAgent:
         def parse_factor_matrices(input_text):
             """Parse L and/or U matrices from LLM output.
             
-            When self.frozen_factor == 'L', only U (and bias) are parsed; L is kept fixed.
-            When self.frozen_factor == 'U', only L (and bias) are parsed; U is kept fixed.
-            When self.frozen_factor is None, both L and U are parsed.
+            When effective_frozen_factor == 'L', only U (and bias) are parsed; L is kept fixed.
+            When effective_frozen_factor == 'U', only L (and bias) are parsed; U is kept fixed.
+            When effective_frozen_factor is None, both L and U are parsed.
             """
             lines = input_text.strip().split('\n')
 
@@ -352,14 +365,14 @@ class LLMNumOptimAgent:
                         
                         # Validate row length before adding
                         if current_section == 'L':
-                            if self.frozen_factor == 'L':
+                            if effective_frozen_factor == 'L':
                                 pass  # Skip – L is frozen; LLM may still include it for reference
                             elif len(row) == expected_L_cols:
                                 L_matrix.append(row)
                             else:
                                 print(f"Warning: Skipping L row with {len(row)} values (expected {expected_L_cols}): {row}")
                         elif current_section == 'U':
-                            if self.frozen_factor == 'U':
+                            if effective_frozen_factor == 'U':
                                 pass  # Skip – U is frozen
                             elif len(row) == expected_U_cols:
                                 U_matrix.append(row)
@@ -368,10 +381,10 @@ class LLMNumOptimAgent:
                         elif current_section == 'bias':
                             bias_vector.extend(row)
             
-            print(f"Parsed {len(L_matrix)} L rows, {len(U_matrix)} U rows (frozen_factor={self.frozen_factor!r})")
+            print(f"Parsed {len(L_matrix)} L rows, {len(U_matrix)} U rows (frozen_factor={effective_frozen_factor!r})")
             
             # For frozen matrices, use the current policy values unchanged
-            if self.frozen_factor == 'L':
+            if effective_frozen_factor == 'L':
                 L = self.policy.L.copy()
             else:
                 try:
@@ -381,7 +394,7 @@ class LLMNumOptimAgent:
                     print(f"L_matrix content: {L_matrix}")
                     return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
-            if self.frozen_factor == 'U':
+            if effective_frozen_factor == 'U':
                 U = self.policy.U.copy()
             else:
                 try:
@@ -401,20 +414,20 @@ class LLMNumOptimAgent:
             
             if L.shape != expected_L_shape:
                 print(f"ERROR: L matrix has wrong shape {L.shape}, expected {expected_L_shape}")
-                if self.frozen_factor != 'L':
+                if effective_frozen_factor != 'L':
                     print(f"LLM provided {len(L_matrix)} rows, expected {expected_L_shape[0]} rows with {expected_L_shape[1]} columns each")
                 return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             if U.shape != expected_U_shape:
                 print(f"ERROR: U matrix has wrong shape {U.shape}, expected {expected_U_shape}")
-                if self.frozen_factor != 'U':
+                if effective_frozen_factor != 'U':
                     print(f"LLM provided {len(U_matrix)} rows, expected {expected_U_shape[0]} rows with {expected_U_shape[1]} columns each")
                 return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
             
             print(f"✓ Shapes validated correctly")
-            if self.frozen_factor != 'L':
+            if effective_frozen_factor != 'L':
                 print(f"L matrix:\n{L}")
-            if self.frozen_factor != 'U':
+            if effective_frozen_factor != 'U':
                 print(f"U matrix:\n{U}")
             
             return {'L': L, 'U': U, 'bias': bias}
@@ -441,17 +454,17 @@ class LLMNumOptimAgent:
         def str_factor_examples(replay_buffer: EpisodeRewardBufferNoBias):
             """Format examples showing L/U matrices and rewards.
             
-            When frozen_factor is set, only the optimizable matrix is shown per
+            When effective_frozen_factor is set, only the optimizable matrix is shown per
             attempt and the frozen matrix is displayed once at the top.
             """
             # ---- Frozen-matrix preamble ----
             preamble = ""
-            if self.frozen_factor == 'L' and self.policy.L is not None:
+            if effective_frozen_factor == 'L' and self.policy.L is not None:
                 preamble += "FIXED L matrix (stays constant – do NOT change this):\n"
                 for row in self.policy.L:
                     preamble += ", ".join([f"{x:.2f}" for x in row]) + "\n"
                 preamble += "\n"
-            elif self.frozen_factor == 'U' and self.policy.U is not None:
+            elif effective_frozen_factor == 'U' and self.policy.U is not None:
                 preamble += "FIXED U matrix (stays constant – do NOT change this):\n"
                 for row in self.policy.U:
                     preamble += ", ".join([f"{x:.2f}" for x in row]) + "\n"
@@ -475,11 +488,11 @@ class LLMNumOptimAgent:
                     U = weights['U']
                     text += f"Attempt #{idx}:\n"
                     # Only show the matrix the LLM is allowed to change
-                    if self.frozen_factor != 'L':
+                    if effective_frozen_factor != 'L':
                         text += "L matrix:\n"
                         for row in L:
                             text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
-                    if self.frozen_factor != 'U':
+                    if effective_frozen_factor != 'U':
                         text += "U matrix:\n"
                         for row in U:
                             text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
@@ -497,6 +510,36 @@ class LLMNumOptimAgent:
         # Update the policy using llm_brain, q_table and replay_buffer
         self._prune_replay_buffer_for_groq()
         print("Updating the policy...")
+
+        current_frozen_factor = self.frozen_factor
+        schedule_context = None
+        if self.use_factorized_policy and self.enable_alternating_lu_schedule:
+            schedule_period = self.lu_schedule_l_episodes + self.lu_schedule_u_iterations
+            schedule_step = self.training_episodes % schedule_period
+            if schedule_step < self.lu_schedule_l_episodes:
+                # L update phase: freeze U, optimize L.
+                current_frozen_factor = 'U'
+                schedule_phase = "update_L_freeze_U"
+            else:
+                # U update phase: freeze L, optimize U.
+                current_frozen_factor = 'L'
+                schedule_phase = "update_U_freeze_L"
+
+            schedule_context = {
+                "enabled": True,
+                "phase": schedule_phase,
+                "l_episodes": self.lu_schedule_l_episodes,
+                "u_iterations": self.lu_schedule_u_iterations,
+                "cycle_step": schedule_step + 1,
+                "cycle_length": schedule_period,
+            }
+            print(
+                "[LU Schedule] "
+                f"cycle_step={schedule_step + 1}/{schedule_period}, "
+                f"phase={schedule_phase}, frozen_factor={current_frozen_factor}"
+            )
+
+        effective_frozen_factor = current_frozen_factor
         
         if self.use_factorized_policy:
             # Two-matrix policy: LLM generates L and/or U, policy = L @ U
@@ -511,7 +554,8 @@ class LLMNumOptimAgent:
                 dim_action=self.policy.dim_actions,
                 factor_rank=self.factor_rank,
                 use_factorized=True,
-                frozen_factor=self.frozen_factor,
+                frozen_factor=current_frozen_factor,
+                schedule_context=schedule_context,
             )
             self.api_call_time += api_time
             

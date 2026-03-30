@@ -34,6 +34,9 @@ def run_training_loop(
     use_factorized_policy=False,
     factor_rank=None,
     frozen_factor=None,
+    enable_alternating_lu_schedule=False,
+    lu_schedule_l_episodes=5,
+    lu_schedule_u_iterations=3,
     seed=None,
 ):
     assert task in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj", "dist_state_llm_num_optim"]
@@ -70,6 +73,9 @@ def run_training_loop(
                 use_factorized_policy=use_factorized_policy,
                 factor_rank=factor_rank,
                 frozen_factor=frozen_factor,
+                enable_alternating_lu_schedule=enable_alternating_lu_schedule,
+                lu_schedule_l_episodes=lu_schedule_l_episodes,
+                lu_schedule_u_iterations=lu_schedule_u_iterations,
                 seed=seed,
             )
         elif task == "cont_space_llm_num_optim_rndm_proj":

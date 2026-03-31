@@ -1,6 +1,7 @@
 import gymnasium as gym
 import random
 import re
+import math
 import numpy as np
 import os
 import time
@@ -811,6 +812,9 @@ class LLMBrain:
         self.reset_llm_conversation()
 
         schedule_context = schedule_context or {}
+        factor_value_bound = 6.0
+        if factor_rank is not None and factor_rank > 0:
+            factor_value_bound = math.sqrt(6.0 / float(factor_rank))
 
         system_prompt = self.llm_si_template.render(
             {
@@ -823,6 +827,7 @@ class LLMBrain:
                 "dim_state": dim_state,
                 "dim_action": dim_action,
                 "factor_rank": factor_rank,
+                "factor_value_bound": factor_value_bound,
                 "frozen_factor": frozen_factor,
                 "lu_schedule_enabled": bool(schedule_context.get("enabled", False)),
                 "lu_schedule_phase": schedule_context.get("phase"),

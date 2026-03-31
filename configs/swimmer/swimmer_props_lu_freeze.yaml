@@ -2,7 +2,7 @@ task: cont_space_llm_num_optim
 num_episodes: 400
 gym_env_name: Swimmer-v5
 render_mode: null
-logdir: logs/swimmer_props_lu_freeze_U
+logdir: logs/swimmer_props_lu_freeze_U_FR3_limited_range
 dim_actions: 2
 dim_states: 8
 max_traj_count: 1000
@@ -10,7 +10,7 @@ max_traj_length: 1000
 template_dir: agent/policy/templates
 llm_si_template_name: num_optim_lu.j2
 llm_output_conversion_template_name: num_optim_lu.j2
-llm_model_name: /data/datasets/community/huggingface/models--openai--gpt-oss-120b/snapshots/8b193b0ef83bd41b40eb71fee8f1432315e02a3e
+llm_model_name: gpt-oss:120b
 num_evaluation_episodes: 20
 warmup_episodes: 20
 warmup_dir: null
@@ -18,5 +18,8 @@ bias: true
 optimum: 250
 search_step_size: 0.1
 use_factorized_policy: true
-factor_rank: 4
-frozen_factor: U
+factor_rank: 3
+frozen_factor: L
+enable_alternating_lu_schedule: false
+lu_schedule_l_episodes: 5
+lu_schedule_u_iterations: 3 

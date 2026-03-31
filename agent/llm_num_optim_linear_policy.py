@@ -117,6 +117,13 @@ class LLMNumOptimAgent:
         # Track best reward for conditional video recording
         self.best_reward = -float('inf')
 
+        # Alternating LU schedule state:
+        # keep the best-performing candidate within each phase and use it when
+        # switching phases to decide which matrix should be frozen next.
+        self._lu_schedule_prev_phase = None
+        self._lu_phase_best_reward = float('-inf')
+        self._lu_phase_best_components = None
+
         if self.bias:
             self.dim_state += 1
 
@@ -168,6 +175,58 @@ class LLMNumOptimAgent:
             selected_entries,
             maxlen=self.replay_buffer.buffer.maxlen,
         )
+
+    def _clone_factor_components(self, factor_components):
+        if not isinstance(factor_components, dict):
+            return None
+        return {
+            'L': np.array(factor_components['L'], copy=True),
+            'U': np.array(factor_components['U'], copy=True),
+            'bias': np.array(factor_components['bias'], copy=True),
+        }
+
+    def _apply_phase_best_on_switch(self, current_phase):
+        """If phase changed, freeze the best matrix from the previous phase."""
+        if self._lu_schedule_prev_phase == current_phase:
+            return
+
+        previous_phase = self._lu_schedule_prev_phase
+        if previous_phase is not None and self._lu_phase_best_components is not None:
+            if previous_phase == "update_L_freeze_U":
+                # Previous phase optimized L; freeze the best L when moving to U updates.
+                self.policy.L = np.array(self._lu_phase_best_components['L'], copy=True)
+                print(
+                    "[LU Schedule] Phase switch: freezing best L from previous phase "
+                    f"(best_reward={self._lu_phase_best_reward:.2f})."
+                )
+            elif previous_phase == "update_U_freeze_L":
+                # Previous phase optimized U; freeze the best U when moving to L updates.
+                self.policy.U = np.array(self._lu_phase_best_components['U'], copy=True)
+                print(
+                    "[LU Schedule] Phase switch: freezing best U from previous phase "
+                    f"(best_reward={self._lu_phase_best_reward:.2f})."
+                )
+
+            self.policy.reconstruct_weight_from_factors()
+
+        self._lu_schedule_prev_phase = current_phase
+        self._lu_phase_best_reward = float('-inf')
+        self._lu_phase_best_components = None
+
+    def _update_phase_best_components(self, phase_name, reward, factor_components):
+        """Track the best-performing factor components in the current phase."""
+        if self._lu_schedule_prev_phase != phase_name:
+            return
+        if not isinstance(factor_components, dict):
+            return
+
+        if reward > self._lu_phase_best_reward:
+            self._lu_phase_best_reward = reward
+            self._lu_phase_best_components = self._clone_factor_components(factor_components)
+            print(
+                "[LU Schedule] New phase best: "
+                f"phase={phase_name}, reward={reward:.2f}"
+            )
 
     def rollout_episode(self, world: BaseWorld, logging_file, record=True):
         # Ensure deterministic behavior for this episode
@@ -513,6 +572,7 @@ class LLMNumOptimAgent:
 
         current_frozen_factor = self.frozen_factor
         schedule_context = None
+        schedule_phase = None
         if self.use_factorized_policy and self.enable_alternating_lu_schedule:
             schedule_period = self.lu_schedule_l_episodes + self.lu_schedule_u_iterations
             schedule_step = self.training_episodes % schedule_period
@@ -538,6 +598,9 @@ class LLMNumOptimAgent:
                 f"cycle_step={schedule_step + 1}/{schedule_period}, "
                 f"phase={schedule_phase}, frozen_factor={current_frozen_factor}"
             )
+
+            # On phase boundaries, freeze the best matrix from the previous phase.
+            self._apply_phase_best_on_switch(schedule_phase)
 
         effective_frozen_factor = current_frozen_factor
         
@@ -608,6 +671,14 @@ class LLMNumOptimAgent:
         variance = np.var(results)
         std = np.std(results)
         print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
+
+        if (
+            self.use_factorized_policy
+            and self.enable_alternating_lu_schedule
+            and schedule_phase is not None
+        ):
+            self._update_phase_best_components(schedule_phase, result, new_parameter_list)
+
         self.replay_buffer.add(new_parameter_list, result)
         self._prune_replay_buffer_for_groq()
         

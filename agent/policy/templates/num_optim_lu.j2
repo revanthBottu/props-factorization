@@ -26,14 +26,14 @@ Current phase: **{{ lu_schedule_phase }}**.
 {% if frozen_factor == 'L' %}
 **L is FIXED and will NOT change.** Its values are provided in the examples below.
 You will only propose values for **U** (and bias).
-All values in **U** are in the range [-6.0, 6.0] with 2 decimal places for higher precision.
+All values in **U** are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.
 {% elif frozen_factor == 'U' %}
 **U is FIXED and will NOT change.** Its values are provided in the examples below.
 You will only propose values for **L** (and bias).
-All values in **L** are in the range [-6.0, 6.0] with 2 decimal places for higher precision.
+All values in **L** are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.
 {% else %}
 Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} x {{ dim_action }}), you will propose both L and U.
-**All values in L and U are in the range [-6.0, 6.0] with 2 decimal places for higher precision.**
+**All values in L and U are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.**
 {% endif %}
 
 # Here's how we'll interact:
@@ -56,7 +56,8 @@ Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} 
 # Remember:
 1. **Do not propose previously seen {% if frozen_factor == 'L' %}U matrices{% elif frozen_factor == 'U' %}L matrices{% else %}matrices{% endif %}.**
 2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. You should explore along with exploiting.
-3. Search both positive and negative values. **During exploration, use search step size of {{ step_size }}**.
+3. Search both positive and negative values across different indices in the matrix. **During exploration, use search step size of {{ step_size }}**.
+4. During exploration, DO NOT return sparse matrices, editing only a few values/rows. Make small adjustments across many values in the matrix. 
 {% if lu_schedule_enabled %}
 4. **Strictly follow the active schedule phase above.** In this step, only update the currently allowed matrix and keep the other matrix unchanged.
 {% endif %}

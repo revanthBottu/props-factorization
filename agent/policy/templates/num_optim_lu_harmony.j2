@@ -13,7 +13,7 @@ U shape: {{ factor_rank }} x {{ dim_action }}.
 Numeric constraints:
 - Use decimal numbers only.
 - Do not use scientific notation.
-- Every numeric value must alwaysbe within [-6.0, 6.0].
+- Every numeric value must always be within [-{{ factor_value_bound }}, {{ factor_value_bound }}].
 - Prefer 2 decimal places.
 
 {% if frozen_factor == 'L' %}

@@ -16,7 +16,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import platform
-from collections import deque
 
 # Enable headless rendering for video recording on servers without display
 # Only use 'egl' on Linux; Windows uses 'glfw' by default
@@ -124,6 +123,10 @@ class LLMNumOptimAgent:
         self._lu_phase_best_reward = float('-inf')
         self._lu_phase_best_components = None
 
+        # Quality shaping metadata from the most recently parsed factor proposal.
+        self._current_matrix_structure_penalty = 0.0
+        self._current_matrix_quality_notes = []
+
         if self.bias:
             self.dim_state += 1
 
@@ -163,18 +166,219 @@ class LLMNumOptimAgent:
         return [entries[idx] for idx in selected_indices]
 
     def _prune_replay_buffer_for_groq(self):
-        """Keep replay buffer aligned with Groq prompt budget policy."""
-        if not self._is_groq_mode():
-            return
+        """Preserve full replay history; prompt selection handles provider budgets."""
+        return
 
-        selected_entries = self._select_prompt_replay_entries(self.replay_buffer)
-        if len(selected_entries) == len(self.replay_buffer.buffer):
-            return
+    def _extract_reward_sequence(self, replay_entries):
+        rewards = []
+        for entry in replay_entries:
+            if isinstance(entry, (tuple, list)) and len(entry) >= 2:
+                try:
+                    rewards.append(float(entry[1]))
+                except Exception:
+                    continue
+        return rewards
 
-        self.replay_buffer.buffer = deque(
-            selected_entries,
-            maxlen=self.replay_buffer.buffer.maxlen,
-        )
+    def _build_reward_delta_context(self, replay_buffer: EpisodeRewardBufferNoBias):
+        """Build prompt context for latest reward deltas.
+
+        Deltas are computed from the full replay history so they reflect
+        all previous matrix proposals and rewards.
+        """
+        rewards = self._extract_reward_sequence(list(replay_buffer.buffer))
+
+        context = {
+            "last_reward": None,
+            "delta_from_prev_reward": None,
+            "delta_from_best_reward": None,
+            "delta_from_zero_reward": None,
+            "distance_below_zero": None,
+            "delta_toward_zero_from_prev": None,
+        }
+        if not rewards:
+            return context
+
+        last_reward = rewards[-1]
+        best_reward = max(rewards)
+        context["last_reward"] = f"{last_reward:.2f}"
+        context["delta_from_zero_reward"] = f"{last_reward:+.2f}"
+        context["distance_below_zero"] = f"{max(0.0, -last_reward):.2f}"
+        if len(rewards) >= 2:
+            prev_reward = rewards[-2]
+            context["delta_from_prev_reward"] = f"{(last_reward - prev_reward):+.2f}"
+            prev_below_zero_gap = max(0.0, -prev_reward)
+            curr_below_zero_gap = max(0.0, -last_reward)
+            context["delta_toward_zero_from_prev"] = f"{(prev_below_zero_gap - curr_below_zero_gap):+.2f}"
+        context["delta_from_best_reward"] = f"{(last_reward - best_reward):+.2f}"
+        return context
+
+    def _dominant_value_ratio(self, vector, decimals=2):
+        vector = np.asarray(vector, dtype=float)
+        if vector.size == 0:
+            return 0.0
+        rounded = np.round(vector, decimals=decimals)
+        _, counts = np.unique(rounded, return_counts=True)
+        return float(np.max(counts) / rounded.size)
+
+    def _cosine_similarity(self, vec_a, vec_b):
+        vec_a = np.asarray(vec_a, dtype=float)
+        vec_b = np.asarray(vec_b, dtype=float)
+        norm_product = float(np.linalg.norm(vec_a) * np.linalg.norm(vec_b))
+        if norm_product < 1e-8:
+            return 1.0 if np.linalg.norm(vec_a - vec_b) < 1e-8 else 0.0
+        similarity = float(np.dot(vec_a, vec_b) / norm_product)
+        return float(np.clip(similarity, -1.0, 1.0))
+
+    def _assess_matrix_structure(self, matrix, matrix_name):
+        """Assess matrix structure with hard invalidation and soft penalties."""
+        matrix = np.asarray(matrix, dtype=float)
+        hard_issues = []
+        soft_notes = []
+        penalty_score = 0.0
+
+        def _dominance_threshold(length):
+            if length >= 6:
+                return 0.75
+            if length >= 4:
+                return 0.80
+            if length == 3:
+                return 1.00
+            return 1.10  # effectively disabled for vectors shorter than 3
+
+        def _inspect_axis(vectors, axis_name):
+            nonlocal penalty_score
+            vector_count = len(vectors)
+
+            for idx, vec in enumerate(vectors):
+                vec = np.asarray(vec, dtype=float)
+                if vec.size >= 3:
+                    dominant_ratio = self._dominant_value_ratio(vec)
+                    threshold = _dominance_threshold(vec.size)
+                    if dominant_ratio >= threshold:
+                        hard_issues.append(
+                            f"{matrix_name} {axis_name} {idx} is too repetitive "
+                            f"(dominant value ratio {dominant_ratio:.2f}, threshold {threshold:.2f})."
+                        )
+
+                vec_scale = max(1.0, float(np.max(np.abs(vec))))
+                vec_relative_std = float(np.std(vec) / vec_scale)
+                if vec.size >= 3 and vec_relative_std < 0.08:
+                    penalty_score += float((0.08 - vec_relative_std) * 2.0)
+                    soft_notes.append(
+                        f"{matrix_name} {axis_name} {idx} is close to flat "
+                        f"(relative std {vec_relative_std:.3f})."
+                    )
+
+            for i in range(vector_count):
+                vec_i = np.asarray(vectors[i], dtype=float)
+                for j in range(i + 1, vector_count):
+                    vec_j = np.asarray(vectors[j], dtype=float)
+                    mean_abs_diff = float(np.mean(np.abs(vec_i - vec_j)))
+                    cosine = self._cosine_similarity(vec_i, vec_j)
+
+                    if np.allclose(vec_i, vec_j, atol=0.08, rtol=0.0):
+                        hard_issues.append(
+                            f"{matrix_name} {axis_name}s {i} and {j} are repeated or near-repeated."
+                        )
+                    elif cosine >= 0.995 and mean_abs_diff <= 0.20:
+                        hard_issues.append(
+                            f"{matrix_name} {axis_name}s {i} and {j} are too similar "
+                            f"(cos {cosine:.3f}, mean abs diff {mean_abs_diff:.3f})."
+                        )
+                    elif cosine >= 0.96 and mean_abs_diff <= 0.35:
+                        penalty_score += float((cosine - 0.96) * 4.0)
+                        soft_notes.append(
+                            f"{matrix_name} {axis_name}s {i} and {j} show repeating structure "
+                            f"(cos {cosine:.3f})."
+                        )
+
+        row_vectors = [matrix[idx, :] for idx in range(matrix.shape[0])]
+        col_vectors = [matrix[:, idx] for idx in range(matrix.shape[1])]
+        _inspect_axis(row_vectors, "row")
+        _inspect_axis(col_vectors, "column")
+
+        if matrix.shape[0] >= 2:
+            zero_tolerance = 0.05
+            row_sign_patterns = []
+            for row in row_vectors:
+                signs = np.where(row > zero_tolerance, 1, np.where(row < -zero_tolerance, -1, 0))
+                row_sign_patterns.append(tuple(signs.tolist()))
+
+            unique_patterns = len(set(row_sign_patterns))
+            pattern_diversity = unique_patterns / float(len(row_sign_patterns))
+            if pattern_diversity < 0.50:
+                penalty_score += float((0.50 - pattern_diversity) * 4.0)
+                soft_notes.append(
+                    f"{matrix_name} row sign patterns lack diversity "
+                    f"({unique_patterns}/{len(row_sign_patterns)} unique)."
+                )
+
+        global_scale = max(1.0, float(np.max(np.abs(matrix))))
+        global_relative_std = float(np.std(matrix) / global_scale)
+        if global_relative_std < 0.12:
+            penalty_score += float((0.12 - global_relative_std) * 6.0)
+            soft_notes.append(
+                f"{matrix_name} has low global variance (relative std {global_relative_std:.3f})."
+            )
+
+        if matrix.shape[0] >= 2:
+            row_relative_std = np.std(matrix, axis=1) / global_scale
+            flat_row_ratio = float(np.mean(row_relative_std < 0.08))
+            if flat_row_ratio >= 0.50:
+                penalty_score += float((flat_row_ratio - 0.50) * 5.0)
+                soft_notes.append(
+                    f"{matrix_name} has many flat rows ({flat_row_ratio:.0%})."
+                )
+
+        if matrix.shape[1] >= 2:
+            col_relative_std = np.std(matrix, axis=0) / global_scale
+            flat_col_ratio = float(np.mean(col_relative_std < 0.08))
+            if flat_col_ratio >= 0.50:
+                penalty_score += float((flat_col_ratio - 0.50) * 5.0)
+                soft_notes.append(
+                    f"{matrix_name} has many flat columns ({flat_col_ratio:.0%})."
+                )
+
+        if matrix.shape[0] == matrix.shape[1] and matrix.shape[0] >= 2:
+            denom = float(np.mean(np.abs(matrix))) + 1e-8
+            asymmetry = float(np.mean(np.abs(matrix - matrix.T)) / denom)
+            symmetry_score = max(0.0, 1.0 - asymmetry)
+            if symmetry_score >= 0.92:
+                penalty_score += float((symmetry_score - 0.92) * 6.0)
+                soft_notes.append(
+                    f"{matrix_name} is close to symmetric (score {symmetry_score:.3f})."
+                )
+
+        # Keep logs compact and deterministic.
+        hard_issues = list(dict.fromkeys(hard_issues))
+        soft_notes = list(dict.fromkeys(soft_notes))
+        if len(hard_issues) > 8:
+            hard_issues = hard_issues[:8]
+        if len(soft_notes) > 10:
+            soft_notes = soft_notes[:10]
+
+        return {
+            "is_valid": len(hard_issues) == 0,
+            "hard_issues": hard_issues,
+            "penalty_score": float(min(12.0, max(0.0, penalty_score))),
+            "soft_notes": soft_notes,
+        }
+
+    def _scale_structure_penalty(self, penalty_score, raw_reward):
+        if penalty_score <= 0:
+            return 0.0
+        try:
+            optimum_abs = abs(float(self.optimum))
+        except Exception:
+            optimum_abs = 0.0
+
+        # Keep penalties meaningful across environments with different reward scales.
+        reward_scale = max(1.0, optimum_abs / 200.0)
+        scaled_penalty = float(penalty_score) * reward_scale
+
+        # Avoid overwhelming the true environment signal.
+        raw_scale = max(1.0, abs(float(raw_reward)))
+        return float(min(scaled_penalty, raw_scale * 0.25))
 
     def _clone_factor_components(self, factor_components):
         if not isinstance(factor_components, dict):
@@ -376,6 +580,15 @@ class LLMNumOptimAgent:
             When effective_frozen_factor == 'U', only L (and bias) are parsed; U is kept fixed.
             When effective_frozen_factor is None, both L and U are parsed.
             """
+            self._current_matrix_structure_penalty = 0.0
+            self._current_matrix_quality_notes = []
+
+            fallback_components = {
+                'L': self.policy.L.copy(),
+                'U': self.policy.U.copy(),
+                'bias': self.policy.bias.copy(),
+            }
+
             lines = input_text.strip().split('\n')
 
             def detect_section(raw_line):
@@ -451,7 +664,7 @@ class LLMNumOptimAgent:
                 except ValueError as e:
                     print(f"ERROR creating L matrix: {e}")
                     print(f"L_matrix content: {L_matrix}")
-                    return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+                    return fallback_components
             
             if effective_frozen_factor == 'U':
                 U = self.policy.U.copy()
@@ -461,7 +674,7 @@ class LLMNumOptimAgent:
                 except ValueError as e:
                     print(f"ERROR creating U matrix: {e}")
                     print(f"U_matrix content: {U_matrix}")
-                    return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+                    return fallback_components
             
             bias = np.array(bias_vector).reshape(1, -1) if bias_vector else self.policy.bias
             
@@ -475,13 +688,46 @@ class LLMNumOptimAgent:
                 print(f"ERROR: L matrix has wrong shape {L.shape}, expected {expected_L_shape}")
                 if effective_frozen_factor != 'L':
                     print(f"LLM provided {len(L_matrix)} rows, expected {expected_L_shape[0]} rows with {expected_L_shape[1]} columns each")
-                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+                return fallback_components
             
             if U.shape != expected_U_shape:
                 print(f"ERROR: U matrix has wrong shape {U.shape}, expected {expected_U_shape}")
                 if effective_frozen_factor != 'U':
                     print(f"LLM provided {len(U_matrix)} rows, expected {expected_U_shape[0]} rows with {expected_U_shape[1]} columns each")
-                return {'L': self.policy.L.copy(), 'U': self.policy.U.copy(), 'bias': self.policy.bias.copy()}
+                return fallback_components
+
+            total_penalty_score = 0.0
+            quality_notes = []
+            structural_issues = []
+
+            if effective_frozen_factor != 'L':
+                l_assessment = self._assess_matrix_structure(L, "L")
+                total_penalty_score += l_assessment["penalty_score"]
+                quality_notes.extend(l_assessment["soft_notes"])
+                structural_issues.extend(l_assessment["hard_issues"])
+
+            if effective_frozen_factor != 'U':
+                u_assessment = self._assess_matrix_structure(U, "U")
+                total_penalty_score += u_assessment["penalty_score"]
+                quality_notes.extend(u_assessment["soft_notes"])
+                structural_issues.extend(u_assessment["hard_issues"])
+
+            if structural_issues:
+                print("ERROR: Rejecting matrix proposal due to structural invalidation:")
+                for issue in structural_issues:
+                    print(f" - {issue}")
+                return fallback_components
+
+            self._current_matrix_structure_penalty = float(total_penalty_score)
+            self._current_matrix_quality_notes = list(dict.fromkeys(quality_notes))
+
+            if self._current_matrix_structure_penalty > 0:
+                print(
+                    "[Matrix Quality] Soft penalty score: "
+                    f"{self._current_matrix_structure_penalty:.3f}"
+                )
+                for note in self._current_matrix_quality_notes:
+                    print(f" - {note}")
             
             print(f"✓ Shapes validated correctly")
             if effective_frozen_factor != 'L':
@@ -603,8 +849,12 @@ class LLMNumOptimAgent:
             self._apply_phase_best_on_switch(schedule_phase)
 
         effective_frozen_factor = current_frozen_factor
+        reward_delta_context = self._build_reward_delta_context(self.replay_buffer)
         
         if self.use_factorized_policy:
+            self._current_matrix_structure_penalty = 0.0
+            self._current_matrix_quality_notes = []
+
             # Two-matrix policy: LLM generates L and/or U, policy = L @ U
             new_factor_components, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
                 str_factor_examples(self.replay_buffer),
@@ -619,6 +869,7 @@ class LLMNumOptimAgent:
                 use_factorized=True,
                 frozen_factor=current_frozen_factor,
                 schedule_context=schedule_context,
+                reward_context=reward_delta_context,
             )
             self.api_call_time += api_time
             
@@ -636,7 +887,8 @@ class LLMNumOptimAgent:
                 self.training_episodes,
                 self.rank,
                 self.optimum,
-                self.search_step_size
+                self.search_step_size,
+                reward_context=reward_delta_context,
             )
             self.api_call_time += api_time
 
@@ -671,6 +923,16 @@ class LLMNumOptimAgent:
         variance = np.var(results)
         std = np.std(results)
         print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
+
+        if self.use_factorized_policy:
+            raw_penalty_score = float(getattr(self, "_current_matrix_structure_penalty", 0.0))
+            if raw_penalty_score > 0:
+                print(
+                    "[Matrix Quality] Soft-penalty signal (informational only): "
+                    f"raw_score={raw_penalty_score:.3f}; reward buffer keeps raw reward={result:.2f}"
+                )
+                for note in getattr(self, "_current_matrix_quality_notes", []):
+                    print(f" - {note}")
 
         if (
             self.use_factorized_policy

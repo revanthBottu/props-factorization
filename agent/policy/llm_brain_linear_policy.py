@@ -808,10 +808,12 @@ class LLMBrain:
         use_factorized=False,
         frozen_factor=None,
         schedule_context=None,
+        reward_context=None,
     ):
         self.reset_llm_conversation()
 
         schedule_context = schedule_context or {}
+        reward_context = reward_context or {}
         factor_value_bound = 6.0
         if factor_rank is not None and factor_rank > 0:
             factor_value_bound = math.sqrt(6.0 / float(factor_rank))
@@ -835,6 +837,12 @@ class LLMBrain:
                 "lu_schedule_u_iterations": schedule_context.get("u_iterations"),
                 "lu_schedule_cycle_step": schedule_context.get("cycle_step"),
                 "lu_schedule_cycle_length": schedule_context.get("cycle_length"),
+                "last_reward": reward_context.get("last_reward"),
+                "delta_from_prev_reward": reward_context.get("delta_from_prev_reward"),
+                "delta_from_best_reward": reward_context.get("delta_from_best_reward"),
+                "delta_from_zero_reward": reward_context.get("delta_from_zero_reward"),
+                "distance_below_zero": reward_context.get("distance_below_zero"),
+                "delta_toward_zero_from_prev": reward_context.get("delta_toward_zero_from_prev"),
             }
         )
 

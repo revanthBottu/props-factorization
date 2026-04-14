@@ -3,53 +3,264 @@ from agent.policy.base_policy import Policy
 
 
 class LinearPolicy(Policy):
-    def __init__(self, dim_states, dim_actions, use_factorized_policy=False, factor_rank=None):
+    VALID_DECOMPOSITIONS = ("lu", "qr", "svd")
+
+    def __init__(
+        self,
+        dim_states,
+        dim_actions,
+        use_factorized_policy=False,
+        factor_rank=None,
+        decomposition_type="lu",
+    ):
         super().__init__(dim_states, dim_actions)
 
         self.dim_states = dim_states
         self.dim_actions = dim_actions
         self.use_factorized_policy = use_factorized_policy
+        self.decomposition_type = str(decomposition_type or "lu").lower()
+
+        if self.decomposition_type not in self.VALID_DECOMPOSITIONS:
+            raise ValueError(
+                f"decomposition_type must be one of {self.VALID_DECOMPOSITIONS}, "
+                f"got: {decomposition_type!r}"
+            )
 
         # Determine factor rank (inner dimension for L @ U = policy)
+        max_rank = min(dim_states, dim_actions)
         if use_factorized_policy:
             if factor_rank is None:
                 # Default: use min(dim_states, dim_actions) // 2 for reduced representation
-                self.factor_rank = max(1, min(dim_states, dim_actions) // 2)
+                self.factor_rank = max(1, max_rank // 2)
             else:
-                self.factor_rank = factor_rank
+                self.factor_rank = int(factor_rank)
+
+            if self.factor_rank <= 0:
+                raise ValueError(f"factor_rank must be positive, got: {self.factor_rank}")
+            if self.factor_rank > max_rank:
+                raise ValueError(
+                    f"factor_rank ({self.factor_rank}) must be <= min(dim_states, dim_actions) ({max_rank})"
+                )
         else:
             self.factor_rank = None
 
-        self.weight = np.random.rand(self.dim_states, self.dim_actions)
-        self.bias = np.random.rand(1, self.dim_actions)
+        self.weight = self._sample_near_zero_nonzero((self.dim_states, self.dim_actions))
+        self.bias = self._sample_near_zero_nonzero((1, self.dim_actions))
 
-        # Two-matrix factor components: policy = L @ U
-        self.L = None  # shape: (dim_states, factor_rank)
-        self.U = None  # shape: (factor_rank, dim_actions)
+        # Factor components (decomposition-specific)
+        self.factor_names = self._factor_names_for_decomposition(self.decomposition_type) if self.use_factorized_policy else []
+        self.factors = {}
+        self._sync_named_factor_attrs()
+
+    def _sample_near_zero_nonzero(self, shape, scale=0.15, min_abs=0.02, decimals=2):
+        values = np.random.uniform(-scale, scale, size=shape)
+        signs = np.where(values >= 0.0, 1.0, -1.0)
+        values = np.where(np.abs(values) < min_abs, signs * min_abs, values)
+        values = np.round(values, decimals)
+
+        zero_mask = values == 0.0
+        if np.any(zero_mask):
+            replacement = np.random.choice([-min_abs, min_abs], size=int(np.sum(zero_mask)))
+            values[zero_mask] = replacement
+
+        return values
+
+    def _factor_names_for_decomposition(self, decomposition_type):
+        if decomposition_type == "lu":
+            return ["L", "U"]
+        if decomposition_type == "qr":
+            return ["Q", "R"]
+        # svd
+        return ["U", "S", "Vt"]
+
+    def get_factor_names(self):
+        return list(self.factor_names)
+
+    def get_factor_equation(self):
+        equation_map = {
+            "lu": "A = L @ U",
+            "qr": "A = Q @ R",
+            "svd": "A = U @ diag(S) @ Vt",
+        }
+        return equation_map.get(self.decomposition_type, "A = factors")
+
+    def get_factor_shapes(self):
+        if not self.use_factorized_policy:
+            return {}
+
+        m, n, k = self.dim_states, self.dim_actions, self.factor_rank
+        if self.decomposition_type == "lu":
+            return {"L": (m, k), "U": (k, n)}
+        if self.decomposition_type == "qr":
+            return {"Q": (m, k), "R": (k, n)}
+        return {"U": (m, k), "S": (k,), "Vt": (k, n)}
+
+    def canonicalize_factor_name(self, name):
+        if name is None:
+            return None
+
+        normalized = str(name).strip().lower()
+        normalized = normalized.replace("`", "").replace("*", "")
+        normalized = normalized.replace(" ", "").replace("_", "")
+        normalized = normalized.replace("^", "")
+        normalized = normalized.replace("matrix", "")
+        normalized = normalized.replace("vector", "")
+        normalized = normalized.replace("factor", "")
+        normalized = normalized.replace(":", "")
+        normalized = normalized.strip()
+
+        mapping = {
+            "lu": {
+                "l": "L",
+                "u": "U",
+            },
+            "qr": {
+                "q": "Q",
+                "r": "R",
+            },
+            "svd": {
+                "u": "U",
+                "s": "S",
+                "sigma": "S",
+                "singularvalues": "S",
+                "singularvalue": "S",
+                "vt": "Vt",
+                "vtranspose": "Vt",
+                "vtransposed": "Vt",
+                "v": "Vt",
+            },
+        }
+        return mapping.get(self.decomposition_type, {}).get(normalized)
+
+    def _sync_named_factor_attrs(self):
+        # Keep legacy attribute names for compatibility with existing code paths.
+        for attr_name in ("L", "U", "Q", "R", "S", "Vt"):
+            setattr(self, attr_name, None)
+
+        for factor_name, factor_value in self.factors.items():
+            setattr(self, factor_name, factor_value)
+
+    def _initialize_factor_components(self):
+        m, n, k = self.dim_states, self.dim_actions, self.factor_rank
+
+        if self.decomposition_type == "lu":
+            self.factors = {
+                "L": self._sample_near_zero_nonzero((m, k)),
+                "U": self._sample_near_zero_nonzero((k, n)),
+            }
+        elif self.decomposition_type == "qr":
+            q_raw = self._sample_near_zero_nonzero((m, k))
+            q_factor, _ = np.linalg.qr(q_raw, mode="reduced")
+            r_factor = np.triu(self._sample_near_zero_nonzero((k, n)))
+            self.factors = {
+                "Q": np.round(q_factor, 2),
+                "R": r_factor,
+            }
+        else:
+            # SVD factors: A = U @ diag(S) @ Vt
+            u_raw = self._sample_near_zero_nonzero((m, k))
+            u_factor, _ = np.linalg.qr(u_raw, mode="reduced")
+
+            v_raw = self._sample_near_zero_nonzero((n, k))
+            v_factor, _ = np.linalg.qr(v_raw, mode="reduced")
+
+            singular_values = np.sort(np.abs(self._sample_near_zero_nonzero((k,))))[::-1]
+            self.factors = {
+                "U": np.round(u_factor, 2),
+                "S": singular_values,
+                "Vt": np.round(v_factor.T, 2),
+            }
+
+        self._sync_named_factor_attrs()
+
+    def normalize_factor_components(self, factor_components):
+        if not self.use_factorized_policy:
+            return {}
+
+        expected_shapes = self.get_factor_shapes()
+        normalized = {}
+
+        for factor_name, expected_shape in expected_shapes.items():
+            if factor_name not in factor_components:
+                raise ValueError(f"Missing factor '{factor_name}' in factor_components")
+
+            factor_array = np.asarray(factor_components[factor_name], dtype=float)
+            expected_ndim = 1 if len(expected_shape) == 1 else 2
+            if factor_array.ndim != expected_ndim:
+                raise ValueError(
+                    f"Factor '{factor_name}' must have {expected_ndim} dimensions, got {factor_array.ndim}"
+                )
+
+            if expected_ndim == 1:
+                factor_array = factor_array.reshape(-1)
+
+            if factor_array.shape != expected_shape:
+                # Accept transposed Vt if the model outputs V instead.
+                if factor_name == "Vt" and factor_array.ndim == 2 and factor_array.T.shape == expected_shape:
+                    factor_array = factor_array.T
+                else:
+                    raise ValueError(
+                        f"Factor '{factor_name}' has shape {factor_array.shape}, expected {expected_shape}"
+                    )
+
+            normalized[factor_name] = factor_array
+
+        if self.decomposition_type == "qr":
+            q_factor, _ = np.linalg.qr(normalized["Q"], mode="reduced")
+            r_factor = np.triu(normalized["R"])
+            normalized["Q"] = q_factor
+            normalized["R"] = r_factor
+        elif self.decomposition_type == "svd":
+            u_factor, _ = np.linalg.qr(normalized["U"], mode="reduced")
+            v_factor, _ = np.linalg.qr(normalized["Vt"].T, mode="reduced")
+
+            singular_values = np.abs(normalized["S"])
+            order = np.argsort(-singular_values)
+
+            normalized["S"] = singular_values[order]
+            normalized["U"] = u_factor[:, order]
+            normalized["Vt"] = v_factor.T[order, :]
+
+        for factor_name, factor_value in normalized.items():
+            normalized[factor_name] = np.round(factor_value, 2)
+
+        return normalized
 
     def initialize_policy(self):
         # self.weight = np.round((np.random.rand(self.dim_states, self.dim_actions)) * 1, 1)
         # self.bias = np.round((np.random.rand(1, self.dim_actions) - 0.) * 1, 1)
 
-        self.weight = np.round(np.random.normal(0., 3., size=(self.dim_states, self.dim_actions)), 1)
-        self.bias = np.round(np.random.normal(0., 3., size=(1, self.dim_actions)), 1)
+        self.weight = self._sample_near_zero_nonzero((self.dim_states, self.dim_actions))
+        self.bias = self._sample_near_zero_nonzero((1, self.dim_actions))
 
         # self.weight = np.round(np.random.uniform(-3., 3., size=(self.dim_states, self.dim_actions)), 1)
         # self.bias = np.round(np.random.uniform(-3., 3., size=(1, self.dim_actions)), 1)
         
-        # If using factorized policy, initialize L and U randomly
+        # If using factorized policy, initialize decomposition factors and reconstruct.
         if self.use_factorized_policy:
-            self.L = np.round(np.random.normal(0., 1., size=(self.dim_states, self.factor_rank)), 2)
-            self.U = np.round(np.random.normal(0., 1., size=(self.factor_rank, self.dim_actions)), 2)
+            self._initialize_factor_components()
             self.reconstruct_weight_from_factors()
 
     def reconstruct_weight_from_factors(self):
-        """Reconstruct policy weight matrix from L and U: policy = L @ U."""
+        """Reconstruct policy weight matrix from decomposition factors."""
         if not self.use_factorized_policy:
             return
-        
-        # policy weight = L @ U (simple matrix multiplication)
-        self.weight = np.round(self.L @ self.U, 2)
+
+        if not self.factors:
+            return
+
+        self.factors = self.normalize_factor_components(self.factors)
+        self._sync_named_factor_attrs()
+
+        if self.decomposition_type == "lu":
+            self.weight = np.round(self.factors["L"] @ self.factors["U"], 2)
+        elif self.decomposition_type == "qr":
+            self.weight = np.round(self.factors["Q"] @ self.factors["R"], 2)
+        else:
+            self.weight = np.round(
+                self.factors["U"] @ np.diag(self.factors["S"]) @ self.factors["Vt"],
+                2,
+            )
     
     def get_action(self, state):
         state = state.T
@@ -61,20 +272,24 @@ class LinearPolicy(Policy):
         return np.matmul(state, self.weight) + self.bias
 
     def __str__(self):
-        if self.use_factorized_policy and self.L is not None:
-            # Show factorized form: policy = L @ U
-            output = "Factorized Policy (weight = L @ U):\n\n"
-            output += "L matrix:\n"
-            for row in self.L:
-                output += ", ".join([str(i) for i in row])
+        if self.use_factorized_policy and self.factors:
+            output = (
+                f"Factorized Policy ({self.decomposition_type.upper()} decomposition) "
+                f"[{self.get_factor_equation()}]:\n\n"
+            )
+
+            for factor_name in self.factor_names:
+                factor_value = self.factors[factor_name]
+                output += f"{factor_name} factor:\n"
+                if factor_value.ndim == 1:
+                    output += ", ".join([str(i) for i in factor_value]) + "\n"
+                else:
+                    for row in factor_value:
+                        output += ", ".join([str(i) for i in row])
+                        output += "\n"
                 output += "\n"
-            
-            output += "\nU matrix:\n"
-            for row in self.U:
-                output += ", ".join([str(i) for i in row])
-                output += "\n"
-            
-            output += "\nBias:\n"
+
+            output += "Bias:\n"
             for b in self.bias:
                 output += ", ".join([str(i) for i in b])
                 output += "\n"
@@ -93,12 +308,12 @@ class LinearPolicy(Policy):
         return output
 
     def update_policy(self, weight_and_bias_list=None, factor_components=None):
-        """Update policy with either full parameters or L/U factor components."""
+        """Update policy with either full parameters or decomposition factors."""
         if self.use_factorized_policy and factor_components is not None:
-            # Update L, U, bias and reconstruct policy weight = L @ U
-            self.L = factor_components['L']
-            self.U = factor_components['U']
-            self.bias = factor_components['bias']
+            self.factors = self.normalize_factor_components(factor_components)
+            self._sync_named_factor_attrs()
+            if "bias" in factor_components:
+                self.bias = np.array(factor_components["bias"], dtype=float).reshape(1, self.dim_actions)
             self.reconstruct_weight_from_factors()
         elif weight_and_bias_list is not None:
             weight_and_bias_list = np.array(weight_and_bias_list).reshape(self.dim_states + 1, self.dim_actions)
@@ -111,14 +326,23 @@ class LinearPolicy(Policy):
         if return_factors is None:
             return_factors = self.use_factorized_policy
 
-        if return_factors and self.L is not None:
-            # Return L, U factor components
-            return {
-                'L': self.L,
-                'U': self.U,
-                'bias': self.bias,
-                'factor_rank': self.factor_rank
+        if return_factors and self.use_factorized_policy and not self.factors:
+            self._initialize_factor_components()
+            self.reconstruct_weight_from_factors()
+
+        if return_factors and self.factors:
+            factor_payload = {
+                factor_name: np.array(self.factors[factor_name], copy=True)
+                for factor_name in self.factor_names
             }
+            factor_payload.update(
+                {
+                    "bias": np.array(self.bias, copy=True),
+                    "factor_rank": self.factor_rank,
+                    "decomposition_type": self.decomposition_type,
+                }
+            )
+            return factor_payload
         else:
             # Return full parameters
             parameters = np.concatenate((self.weight, self.bias), axis=0)

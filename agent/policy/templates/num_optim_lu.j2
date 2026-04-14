@@ -53,6 +53,19 @@ Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} 
 3. I will then compute params = L @ U, evaluate f(params), and provide the value along with the current iteration.
 4. We will repeat steps 2-3 until we reach the maximum number of iterations.
 
+# Recent Reward Signals
+- Last episode reward: {% if last_reward is not none %}{{ last_reward }}{% else %}N/A{% endif %}
+- Delta vs previous episode: {% if delta_from_prev_reward is not none %}{{ delta_from_prev_reward }}{% else %}N/A (insufficient history){% endif %}
+- Delta vs best reward so far: {% if delta_from_best_reward is not none %}{{ delta_from_best_reward }}{% else %}N/A{% endif %}
+- Delta vs zero (last reward - 0): {% if delta_from_zero_reward is not none %}{{ delta_from_zero_reward }}{% else %}N/A{% endif %}
+- Distance below zero (max(0, -reward)): {% if distance_below_zero is not none %}{{ distance_below_zero }}{% else %}N/A{% endif %}
+
+Use these deltas explicitly:
+- If delta vs previous is negative, the latest direction regressed; change sign layout and structure more aggressively.
+- If delta vs previous is positive, preserve the useful trend while still exploring nearby alternatives.
+- If reward is below zero and change in below-zero gap is positive, the matrix is improving toward zero: exploit around this direction.
+- If distance below zero is large, the matrix is still deep in the negative region: explore more aggressively.
+
 # Remember:
 1. **Do not propose previously seen {% if frozen_factor == 'L' %}U matrices{% elif frozen_factor == 'U' %}L matrices{% else %}matrices{% endif %}.**
 2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. You should explore along with exploiting.
@@ -66,6 +79,10 @@ Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} 
 {% else %}
 5. **Small changes in L or U can cause large changes in params = L @ U** due to matrix multiplication. Generally, make small adjustments to L and U to explore the parameter space effectively and avoid losing reward progress.
 {% endif %}
+6. You MUST have structural diversity: use different sign patterns across rows, non-uniform values, and avoid repeating structures.
+7. Always avoid low-information patterns: symmetry, repeated rows/columns, and flat distributions.
+8. Any row/column dominated by nearly identical values (zeros included), or rows/columns that are too similar to each other, will be treated as invalid and rejected.
+9. Use the reward deltas above and the reward history relative to zero to decide how much to explore alternative.
 
 # Important
 {% if frozen_factor != 'L' %}

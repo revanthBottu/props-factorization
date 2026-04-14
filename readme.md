@@ -70,3 +70,24 @@ Examples:
 - `python main.py --config configs/cartpole/cartpole_lu_ollama_llama32_test.yaml`
 - `python main.py --config configs/cartpole/cartpole_lu_ollama_phi3_test.yaml`
 - `python main.py --config configs/cartpole/cartpole_lu_ollama_deepseek15b_test.yaml`
+
+### Decomposition Config (Factorized Policy)
+
+For factorized linear policies, you can now choose decomposition mode directly in YAML:
+
+```yaml
+use_factorized_policy: true
+factor_rank: 2
+decomposition_type: lu   # lu | qr | svd
+frozen_factor: null      # LU: L/U, QR: Q/R, SVD: U/S/Vt
+```
+
+Template recommendations:
+- `lu`: `llm_si_template_name: num_optim_lu.j2`
+- `qr`: `llm_si_template_name: num_optim_qr.j2`
+- `svd`: `llm_si_template_name: num_optim_svd.j2`
+
+Sample configs:
+- `configs/cartpole/cartpole_lu_test.yaml`
+- `configs/cartpole/cartpole_qr_test.yaml`
+- `configs/cartpole/cartpole_svd_test.yaml`

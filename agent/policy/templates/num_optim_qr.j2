@@ -1,0 +1,82 @@
+You are a global optimizer helping me find the global maximum of a mathematical function f(params).
+I will give you the function evaluation and the current iteration number at each step.
+Your goal is to propose parameter values that efficiently lead us to the global maximum within a limited number of iterations (400).
+
+# About the Policy Representation:
+Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} x {{ dim_action }}), you will propose two matrices Q and R whose product forms the policy:
+**params = Q @ R**
+
+Where:
+**Q**: {{ dim_state }} x {{ factor_rank }} matrix ({{ dim_state }} rows, {{ factor_rank }} columns)
+**R**: {{ factor_rank }} x {{ dim_action }} matrix ({{ factor_rank }} rows, {{ dim_action }} columns)
+
+The actual policy used is the matrix product **params = Q @ R**.
+
+QR constraints:
+1. **Q should have orthonormal columns** (Q^T Q ~= I).
+2. **R should be upper-triangular** (values below the diagonal should be near zero).
+
+{% if frozen_factor == 'Q' %}
+**Q is FIXED and will NOT change.** Its values are provided in the examples below.
+You will only propose values for **R** (and bias).
+All values in **R** are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.
+{% elif frozen_factor == 'R' %}
+**R is FIXED and will NOT change.** Its values are provided in the examples below.
+You will only propose values for **Q** (and bias).
+All values in **Q** are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.
+{% else %}
+You will propose both Q and R.
+**All values in Q and R are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.**
+{% endif %}
+
+# Here's how we'll interact:
+1. I will first provide MAX_STEPS (400) along with a few training examples showing f(params) values for different {% if frozen_factor == 'Q' %}R factors{% elif frozen_factor == 'R' %}Q factors{% else %}Q and R factors{% endif %}.
+2. You will provide your response in the following exact format:
+{% if frozen_factor == 'Q' %}
+    * Line 1: "R matrix:" followed on the next {{ factor_rank }} lines by the R matrix ({{ dim_action }} comma-separated values per row)
+    * Line 2: A detailed explanation of why you chose that factor.
+{% elif frozen_factor == 'R' %}
+    * Line 1: "Q matrix:" followed on the next {{ dim_state }} lines by the Q matrix ({{ factor_rank }} comma-separated values per row)
+    * Line 2: A detailed explanation of why you chose that factor.
+{% else %}
+    * Line 1: "Q matrix:" followed on the next {{ dim_state }} lines by the Q matrix ({{ factor_rank }} comma-separated values per row)
+    * Line 2: "R matrix:" followed on the next {{ factor_rank }} lines by the R matrix ({{ dim_action }} comma-separated values per row)
+    * Line 3: A detailed explanation of why you chose those factors.
+{% endif %}
+3. I will then compute params = Q @ R, evaluate f(params), and provide the value along with the current iteration.
+4. We will repeat steps 2-3 until we reach the maximum number of iterations.
+
+# Recent Reward Signals
+- Last episode reward: {% if last_reward is not none %}{{ last_reward }}{% else %}N/A{% endif %}
+- Delta vs previous episode: {% if delta_from_prev_reward is not none %}{{ delta_from_prev_reward }}{% else %}N/A (insufficient history){% endif %}
+- Delta vs best reward so far: {% if delta_from_best_reward is not none %}{{ delta_from_best_reward }}{% else %}N/A{% endif %}
+- Delta vs zero (last reward - 0): {% if delta_from_zero_reward is not none %}{{ delta_from_zero_reward }}{% else %}N/A{% endif %}
+- Distance below zero (max(0, -reward)): {% if distance_below_zero is not none %}{{ distance_below_zero }}{% else %}N/A{% endif %}
+
+Use these deltas explicitly:
+- If delta vs previous is negative, the latest direction regressed; change sign layout and structure more aggressively.
+- If delta vs previous is positive, preserve the useful trend while still exploring nearby alternatives.
+- If reward is below zero and change in below-zero gap is positive, the matrix is improving toward zero: exploit around this direction.
+- If distance below zero is large, the matrix is still deep in the negative region: explore more aggressively.
+
+# Remember:
+1. **Do not propose previously seen {% if frozen_factor == 'Q' %}R factors{% elif frozen_factor == 'R' %}Q factors{% else %}factors{% endif %}.**
+2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. You should explore along with exploiting.
+3. Search both positive and negative values across different indices in the factors. **During exploration, use search step size of {{ step_size }}**.
+4. During exploration, do not return sparse factors that only edit a few values.
+5. Keep structural diversity: different sign patterns, non-uniform values, and avoid repeating structures.
+6. Avoid low-information patterns: symmetry, repeated rows/columns, and flat distributions.
+7. The fixed factor multiplies your proposed factor. Consider this interaction.
+
+# Important
+{% if frozen_factor != 'Q' %}
+ **Your Q matrix must have EXACTLY {{ dim_state }} rows with {{ factor_rank }} numbers each**
+{% endif %}
+{% if frozen_factor != 'R' %}
+ **Your R matrix must have EXACTLY {{ factor_rank }} rows with {{ dim_action }} numbers each**
+{% endif %}
+
+Next, you will see examples of {% if frozen_factor == 'Q' %}R factors{% elif frozen_factor == 'R' %}Q factors{% else %}Q and R factors{% endif %} and their corresponding f(params) values.
+{{ episode_reward_buffer_string }}
+
+Now you are at iteration {{step_number}} out of 400. Please provide the results in the indicated format. Do not provide any additional texts.

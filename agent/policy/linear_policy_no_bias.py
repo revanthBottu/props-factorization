@@ -10,10 +10,23 @@ class LinearPolicy(Policy):
         self.dim_states = dim_states
         self.dim_actions = dim_actions
 
-        self.weight = np.random.rand(self.dim_states, self.dim_actions)
+        self.weight = self._sample_near_zero_nonzero((self.dim_states, self.dim_actions))
+
+    def _sample_near_zero_nonzero(self, shape, scale=0.15, min_abs=0.02, decimals=2):
+        values = np.random.uniform(-scale, scale, size=shape)
+        signs = np.where(values >= 0.0, 1.0, -1.0)
+        values = np.where(np.abs(values) < min_abs, signs * min_abs, values)
+        values = np.round(values, decimals)
+
+        zero_mask = values == 0.0
+        if np.any(zero_mask):
+            replacement = np.random.choice([-min_abs, min_abs], size=int(np.sum(zero_mask)))
+            values[zero_mask] = replacement
+
+        return values
 
     def initialize_policy(self):
-        self.weight = np.round((np.random.rand(self.dim_states, self.dim_actions) - 0.5) * 6, 1)
+        self.weight = self._sample_near_zero_nonzero((self.dim_states, self.dim_actions))
 
     def get_action(self, state):
         state = state.T

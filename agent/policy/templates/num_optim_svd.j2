@@ -1,51 +1,83 @@
-You are a global optimizer helping me find the optimal parameters for a policy using **truncated SVD factorization**.
-I will give you the function evaluation and the current iteration number at each step. 
-Your goal is to propose parameter values that efficiently lead us to the global maximum within a limited number of iterations (400). 
+You are a global optimizer helping me find the global maximum of a mathematical function f(params).
+I will give you the function evaluation and the current iteration number at each step.
+Your goal is to propose parameter values that efficiently lead us to the global maximum within a limited number of iterations (400).
 
-# About SVD Factorization:
-The policy weight matrix W ({{ dim_states }} x {{ dim_actions }}) is factorized using truncated SVD as:
-**W ≈ U @ Σ @ V^T**
+# About the Policy Representation:
+Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} x {{ dim_action }}), you will propose SVD factors whose product forms the policy:
+**params = U @ diag(S) @ Vt**
 
 Where:
-- **U**: {{ dim_states }} x {{ svd_rank }} matrix (left singular vectors)
-- **Σ** (S): {{ svd_rank }} singular values (diagonal elements)
-- **V^T** (Vt): {{ svd_rank }} x {{ dim_actions }} matrix (right singular vectors transposed)
-- **bias**: 1 x {{ dim_actions }} vector
+**U**: {{ dim_state }} x {{ factor_rank }} matrix ({{ dim_state }} rows, {{ factor_rank }} columns)
+**S**: vector of length {{ factor_rank }} (singular values)
+**Vt**: {{ factor_rank }} x {{ dim_action }} matrix ({{ factor_rank }} rows, {{ dim_action }} columns)
 
-This reduces parameters from {{ (dim_states + 1) * dim_actions }} to {{ dim_states * svd_rank + svd_rank + svd_rank * dim_actions + dim_actions }} values.
+SVD constraints:
+1. **U should have orthonormal columns** (U^T U ~= I).
+2. **Vt should have orthonormal rows** (Vt Vt^T ~= I).
+3. **S should be non-negative and generally ordered from large to small**.
 
-# Parameter Format:
-You will optimize the **factorized components** directly:
-1. U matrix elements: U[0,0], U[0,1], ..., U[{{ dim_states - 1 }},{{ svd_rank - 1 }}]
-2. S vector elements: S[0], S[1], ..., S[{{ svd_rank - 1 }}]
-3. Vt matrix elements: Vt[0,0], Vt[0,1], ..., Vt[{{ svd_rank - 1 }},{{ dim_actions - 1 }}]
-4. bias vector elements: bias[0], bias[1], ..., bias[{{ dim_actions - 1 }}]
+{% if frozen_factor == 'U' %}
+**U is FIXED and will NOT change.** Its values are provided in the examples below.
+You will propose **S** and **Vt** (and bias).
+{% elif frozen_factor == 'S' %}
+**S is FIXED and will NOT change.** Its values are provided in the examples below.
+You will propose **U** and **Vt** (and bias).
+{% elif frozen_factor == 'Vt' %}
+**Vt is FIXED and will NOT change.** Its values are provided in the examples below.
+You will propose **U** and **S** (and bias).
+{% else %}
+You will propose **U**, **S**, and **Vt**.
+{% endif %}
+All factor values should stay within approximately [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places where possible.
 
-**All values are in the range [-6.0, 6.0] with 1-2 decimal places.**
+# Here's how we'll interact:
+1. I will first provide MAX_STEPS (400) along with a few training examples showing f(params) values for previous factor proposals.
+2. You will provide your response in the following exact format:
+{% if frozen_factor != 'U' %}
+    * A block starting with "U matrix:" followed by {{ dim_state }} lines, each with {{ factor_rank }} comma-separated values.
+{% endif %}
+{% if frozen_factor != 'S' %}
+    * A line starting with "S vector:" followed by {{ factor_rank }} comma-separated values.
+{% endif %}
+{% if frozen_factor != 'Vt' %}
+    * A block starting with "Vt matrix:" followed by {{ factor_rank }} lines, each with {{ dim_action }} comma-separated values.
+{% endif %}
+    * A final line with a detailed explanation of why you chose those factors.
+3. I will then compute params = U @ diag(S) @ Vt, evaluate f(params), and provide the value along with the current iteration.
+4. We will repeat steps 2-3 until we reach the maximum number of iterations.
 
-# Response Format:
-Provide your response in the following exact format:
-* Line 1: Updated U matrix (row by row, separated by semicolons):
-  U[0]: u00, u01, ..., u0{{ svd_rank - 1 }}; U[1]: u10, u11, ..., u1{{ svd_rank - 1 }}; ...; U[{{ dim_states - 1 }}]: u{{ dim_states - 1 }}0, ..., u{{ dim_states - 1 }}{{ svd_rank - 1 }}
-* Line 2: Updated S vector:
-  S: s0, s1, ..., s{{ svd_rank - 1 }}
-* Line 3: Updated Vt matrix (row by row, separated by semicolons):
-  Vt[0]: v00, v01, ..., v0{{ dim_actions - 1 }}; Vt[1]: v10, v11, ..., v1{{ dim_actions - 1 }}; ...; Vt[{{ svd_rank - 1 }}]: v{{ svd_rank - 1 }}0, ..., v{{ svd_rank - 1 }}{{ dim_actions - 1 }}
-* Line 4: Updated bias vector:
-  bias: b0, b1, ..., b{{ dim_actions - 1 }}
-* Line 5: Detailed explanation of why you chose these updates.
+# Recent Reward Signals
+- Last episode reward: {% if last_reward is not none %}{{ last_reward }}{% else %}N/A{% endif %}
+- Delta vs previous episode: {% if delta_from_prev_reward is not none %}{{ delta_from_prev_reward }}{% else %}N/A (insufficient history){% endif %}
+- Delta vs best reward so far: {% if delta_from_best_reward is not none %}{{ delta_from_best_reward }}{% else %}N/A{% endif %}
+- Delta vs zero (last reward - 0): {% if delta_from_zero_reward is not none %}{{ delta_from_zero_reward }}{% else %}N/A{% endif %}
+- Distance below zero (max(0, -reward)): {% if distance_below_zero is not none %}{{ distance_below_zero }}{% else %}N/A{% endif %}
 
-# Important Guidelines:
-1. **Do not propose previously seen parameter sets.**
-2. **The global optimum should be around {{ optimum }}.** If below that, explore instead of exploit.
-3. Search both positive and negative values. **Use search step size of {{ step_size }}** during exploration.
-4. When updating, consider:
-   - U and Vt should remain approximately orthonormal (but this is not strictly enforced)
-   - S values should generally be positive (but can be negative for directional changes)
-   - Small changes in factorized form can lead to larger changes in reconstructed matrix
-5. Leverage the low-rank structure: focus on dominant singular vectors/values first.
+Use these deltas explicitly:
+- If delta vs previous is negative, the latest direction regressed; change sign layout and structure more aggressively.
+- If delta vs previous is positive, preserve the useful trend while still exploring nearby alternatives.
+- If reward is below zero and change in below-zero gap is positive, the factors are improving toward zero: exploit around this direction.
+- If distance below zero is large, the policy is still deep in the negative region: explore more aggressively.
 
-# Previous Trials:
+# Remember:
+1. **Do not propose previously seen factor sets.**
+2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. Explore while exploiting.
+3. Search both positive and negative values where appropriate. **During exploration, use search step size of {{ step_size }}**.
+4. Do not return sparse updates that only modify a tiny subset of values.
+5. Keep structural diversity and avoid repeated rows/columns and flat patterns.
+
+# Important
+{% if frozen_factor != 'U' %}
+ **Your U matrix must have EXACTLY {{ dim_state }} rows with {{ factor_rank }} numbers each**
+{% endif %}
+{% if frozen_factor != 'S' %}
+ **Your S vector must have EXACTLY {{ factor_rank }} numbers**
+{% endif %}
+{% if frozen_factor != 'Vt' %}
+ **Your Vt matrix must have EXACTLY {{ factor_rank }} rows with {{ dim_action }} numbers each**
+{% endif %}
+
+Next, you will see examples of factors and their corresponding f(params) values.
 {{ episode_reward_buffer_string }}
 
-Now you are at iteration {{ step_number }} out of 400. Provide results in the indicated format. Do not provide any additional texts outside the format.
+Now you are at iteration {{step_number}} out of 400. Please provide the results in the indicated format. Do not provide any additional texts.

@@ -806,6 +806,8 @@ class LLMBrain:
         dim_action=None,
         factor_rank=None,
         use_factorized=False,
+        decomposition_type="lu",
+        factor_names=None,
         frozen_factor=None,
         schedule_context=None,
         reward_context=None,
@@ -814,6 +816,12 @@ class LLMBrain:
 
         schedule_context = schedule_context or {}
         reward_context = reward_context or {}
+        force_new_matrix_exploration = bool(
+            reward_context.get("force_new_matrix_exploration", False)
+        )
+        force_new_matrix_threshold = reward_context.get("force_new_matrix_threshold", -100.0)
+        force_new_matrix_index_delta = reward_context.get("force_new_matrix_index_delta", 0.35)
+        force_new_matrix_reference_count = reward_context.get("force_new_matrix_reference_count", 5)
         factor_value_bound = 6.0
         if factor_rank is not None and factor_rank > 0:
             factor_value_bound = math.sqrt(6.0 / float(factor_rank))
@@ -830,6 +838,8 @@ class LLMBrain:
                 "dim_action": dim_action,
                 "factor_rank": factor_rank,
                 "factor_value_bound": factor_value_bound,
+                "decomposition_type": decomposition_type,
+                "factor_names": factor_names or [],
                 "frozen_factor": frozen_factor,
                 "lu_schedule_enabled": bool(schedule_context.get("enabled", False)),
                 "lu_schedule_phase": schedule_context.get("phase"),
@@ -843,8 +853,37 @@ class LLMBrain:
                 "delta_from_zero_reward": reward_context.get("delta_from_zero_reward"),
                 "distance_below_zero": reward_context.get("distance_below_zero"),
                 "delta_toward_zero_from_prev": reward_context.get("delta_toward_zero_from_prev"),
+                "force_new_matrix_exploration": force_new_matrix_exploration,
+                "force_new_matrix_threshold": force_new_matrix_threshold,
+                "force_new_matrix_index_delta": force_new_matrix_index_delta,
+                "force_new_matrix_reference_count": force_new_matrix_reference_count,
             }
         )
+
+        if force_new_matrix_exploration:
+            try:
+                threshold_text = f"{float(force_new_matrix_threshold):.2f}"
+            except (TypeError, ValueError):
+                threshold_text = "-100.00"
+
+            try:
+                index_delta_text = f"{float(force_new_matrix_index_delta):.2f}"
+            except (TypeError, ValueError):
+                index_delta_text = "0.35"
+
+            try:
+                reference_count_text = str(int(force_new_matrix_reference_count))
+            except (TypeError, ValueError):
+                reference_count_text = "5"
+
+            system_prompt += (
+                "\n\n[MANDATORY EXPLORATION RESET]\n"
+                f"Latest reward is below {threshold_text}.\n"
+                "Do not exploit prior matrices/factors and do not make incremental edits.\n"
+                "You must produce a completely new proposal with a different value/sign structure.\n"
+                f"Strict uniqueness rule: compared to each of the last {reference_count_text} attempts, "
+                f"every editable index must change by at least {index_delta_text} in absolute value."
+            )
 
         self.add_llm_conversation(system_prompt, "user")
 

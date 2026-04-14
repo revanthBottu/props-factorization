@@ -43,6 +43,7 @@ class LLMNumOptimAgent:
         search_step_size,
         use_factorized_policy=False,
         factor_rank=None,
+        decomposition_type: str = "lu",
         frozen_factor=None,
         enable_alternating_lu_schedule: bool = False,
         lu_schedule_l_episodes: int = 5,
@@ -59,19 +60,43 @@ class LLMNumOptimAgent:
         self.optimum = optimum
         self.search_step_size = search_step_size
         self.use_factorized_policy = use_factorized_policy
-        # Which factor to keep frozen: 'L', 'U', or None (both updated)
-        assert frozen_factor in (None, 'L', 'U'), f"frozen_factor must be None, 'L', or 'U', got: {frozen_factor!r}"
-        self.frozen_factor = frozen_factor
+        self.decomposition_type = str(decomposition_type or "lu").lower()
+        self.allowed_factor_names = {
+            "lu": ("L", "U"),
+            "qr": ("Q", "R"),
+            "svd": ("U", "S", "Vt"),
+        }
+        if self.decomposition_type not in self.allowed_factor_names:
+            raise ValueError(
+                "decomposition_type must be one of "
+                f"{tuple(self.allowed_factor_names.keys())}, got: {decomposition_type!r}"
+            )
+
+        self.frozen_factor = self._canonicalize_factor_name(frozen_factor)
+        if self.frozen_factor is not None and self.frozen_factor not in self.allowed_factor_names[self.decomposition_type]:
+            raise ValueError(
+                f"frozen_factor={frozen_factor!r} is invalid for decomposition_type={self.decomposition_type!r}. "
+                f"Allowed: {self.allowed_factor_names[self.decomposition_type]} or None"
+            )
+
         self.enable_alternating_lu_schedule = bool(enable_alternating_lu_schedule)
         self.lu_schedule_l_episodes = int(lu_schedule_l_episodes)
         self.lu_schedule_u_iterations = int(lu_schedule_u_iterations)
         if self.enable_alternating_lu_schedule:
             if not self.use_factorized_policy:
                 raise ValueError("enable_alternating_lu_schedule requires use_factorized_policy=True")
+            if self.decomposition_type != "lu":
+                raise ValueError("enable_alternating_lu_schedule currently supports decomposition_type='lu' only")
             if self.lu_schedule_l_episodes <= 0 or self.lu_schedule_u_iterations <= 0:
                 raise ValueError("lu_schedule_l_episodes and lu_schedule_u_iterations must both be positive integers")
         # Deterministic seed for episode rollouts. If None, default to 42.
         self.seed = seed if seed is not None else 42
+        self.force_new_matrix_reward_threshold = -100.0
+        # Forced exploration strictness: each editable index must move by at least
+        # this absolute amount relative to recent attempts.
+        self.force_exploration_min_index_delta = 0.35
+        self.force_exploration_reference_count = 5
+        self.force_exploration_max_llm_attempts = 3
 
         if not self.bias:
             param_count = dim_action * dim_state
@@ -80,7 +105,12 @@ class LLMNumOptimAgent:
         self.rank = param_count
         
         # Setup factor rank for two-matrix policy representation
-        print(f"[DEBUG] use_factorized_policy={use_factorized_policy}, factor_rank={factor_rank}, dim_state={dim_state}, dim_action={dim_action}")
+        print(
+            "[DEBUG] "
+            f"use_factorized_policy={use_factorized_policy}, "
+            f"factor_rank={factor_rank}, dim_state={dim_state}, dim_action={dim_action}, "
+            f"decomposition_type={self.decomposition_type}, frozen_factor={self.frozen_factor}"
+        )
         if use_factorized_policy:
             if factor_rank is None:
                 self.factor_rank = max(1, min(dim_state, dim_action) // 2)
@@ -99,7 +129,8 @@ class LLMNumOptimAgent:
                 dim_actions=dim_action, 
                 dim_states=dim_state,
                 use_factorized_policy=use_factorized_policy,
-                factor_rank=self.factor_rank
+                factor_rank=self.factor_rank,
+                decomposition_type=self.decomposition_type,
             )
         self.replay_buffer = EpisodeRewardBufferNoBias(max_size=max_traj_count)
         self.llm_brain = LLMBrain(
@@ -132,6 +163,42 @@ class LLMNumOptimAgent:
 
     def _is_groq_mode(self) -> bool:
         return getattr(self.llm_brain, "model_group", None) == "groq"
+
+    def _canonicalize_factor_name(self, factor_name):
+        if factor_name is None:
+            return None
+
+        if not self.use_factorized_policy:
+            return None
+
+        if hasattr(self, "policy") and hasattr(self.policy, "canonicalize_factor_name"):
+            normalized = self.policy.canonicalize_factor_name(factor_name)
+            if normalized is not None:
+                return normalized
+
+        stripped = str(factor_name).strip()
+        if stripped in self.allowed_factor_names.get(self.decomposition_type, ()):
+            return stripped
+
+        lowered = stripped.lower()
+        for candidate in self.allowed_factor_names.get(self.decomposition_type, ()): 
+            if lowered == candidate.lower():
+                return candidate
+        return None
+
+    def _factor_names(self):
+        if not self.use_factorized_policy:
+            return []
+        return list(self.allowed_factor_names[self.decomposition_type])
+
+    def _factor_shapes(self):
+        if not self.use_factorized_policy:
+            return {}
+        return self.policy.get_factor_shapes()
+
+    def _factor_is_matrix(self, factor_name):
+        shape = self._factor_shapes().get(factor_name)
+        return isinstance(shape, tuple) and len(shape) == 2
 
     def _select_prompt_replay_entries(self, replay_buffer: EpisodeRewardBufferNoBias):
         """Select replay entries for prompting.
@@ -178,6 +245,77 @@ class LLMNumOptimAgent:
                 except Exception:
                     continue
         return rewards
+
+    def _latest_recorded_reward(self):
+        if len(self.replay_buffer.buffer) == 0:
+            return None
+
+        latest_entry = self.replay_buffer.buffer[-1]
+        if not isinstance(latest_entry, (tuple, list)) or len(latest_entry) < 2:
+            return None
+
+        try:
+            return float(latest_entry[1])
+        except Exception:
+            return None
+
+    def _should_force_new_matrix_exploration(self):
+        latest_reward = self._latest_recorded_reward()
+        return latest_reward is not None and latest_reward < self.force_new_matrix_reward_threshold
+
+    def _flatten_editable_values(self, payload, effective_frozen_factor=None):
+        if isinstance(payload, dict):
+            flat_parts = []
+            for factor_name in self._factor_names():
+                if factor_name == effective_frozen_factor:
+                    continue
+                if factor_name not in payload:
+                    return None
+                flat_parts.append(np.asarray(payload[factor_name], dtype=float).reshape(-1))
+
+            if not flat_parts:
+                return np.array([], dtype=float)
+            return np.concatenate(flat_parts)
+
+        vector = np.asarray(payload, dtype=float).reshape(-1)
+        # For full-parameter policies, compare matrix indices only (exclude bias tail).
+        if self.bias and vector.size >= self.dim_action:
+            vector = vector[:-self.dim_action]
+        return vector
+
+    def _validate_forced_exploration_candidate(self, candidate_payload, effective_frozen_factor=None):
+        candidate_vector = self._flatten_editable_values(candidate_payload, effective_frozen_factor)
+        if candidate_vector is None:
+            return False, "candidate payload is missing editable factor values"
+        if candidate_vector.size == 0:
+            return False, "candidate has no editable indices to validate"
+
+        reference_entries = list(self.replay_buffer.buffer)[-self.force_exploration_reference_count:]
+        if len(reference_entries) == 0:
+            return True, "no references available"
+
+        threshold = float(self.force_exploration_min_index_delta)
+
+        for ref_pos, entry in enumerate(reference_entries, start=1):
+            if not isinstance(entry, (tuple, list)) or len(entry) < 1:
+                continue
+
+            reference_payload = entry[0]
+            reference_vector = self._flatten_editable_values(reference_payload, effective_frozen_factor)
+            if reference_vector is None or reference_vector.size != candidate_vector.size:
+                continue
+
+            abs_diff = np.abs(candidate_vector - reference_vector)
+            close_indices = np.where(abs_diff < threshold)[0]
+            if close_indices.size > 0:
+                first_index = int(close_indices[0])
+                return (
+                    False,
+                    f"index {first_index} delta={abs_diff[first_index]:.4f} < "
+                    f"required {threshold:.4f} against recent reference #{ref_pos}",
+                )
+
+        return True, "candidate passed strict index-wise uniqueness"
 
     def _build_reward_delta_context(self, replay_buffer: EpisodeRewardBufferNoBias):
         """Build prompt context for latest reward deltas.
@@ -383,11 +521,16 @@ class LLMNumOptimAgent:
     def _clone_factor_components(self, factor_components):
         if not isinstance(factor_components, dict):
             return None
-        return {
-            'L': np.array(factor_components['L'], copy=True),
-            'U': np.array(factor_components['U'], copy=True),
-            'bias': np.array(factor_components['bias'], copy=True),
-        }
+
+        cloned = {}
+        for factor_name in self._factor_names():
+            if factor_name in factor_components:
+                cloned[factor_name] = np.array(factor_components[factor_name], copy=True)
+
+        if "bias" in factor_components:
+            cloned["bias"] = np.array(factor_components["bias"], copy=True)
+
+        return cloned
 
     def _apply_phase_best_on_switch(self, current_phase):
         """If phase changed, freeze the best matrix from the previous phase."""
@@ -398,14 +541,14 @@ class LLMNumOptimAgent:
         if previous_phase is not None and self._lu_phase_best_components is not None:
             if previous_phase == "update_L_freeze_U":
                 # Previous phase optimized L; freeze the best L when moving to U updates.
-                self.policy.L = np.array(self._lu_phase_best_components['L'], copy=True)
+                self.policy.factors['L'] = np.array(self._lu_phase_best_components['L'], copy=True)
                 print(
                     "[LU Schedule] Phase switch: freezing best L from previous phase "
                     f"(best_reward={self._lu_phase_best_reward:.2f})."
                 )
             elif previous_phase == "update_U_freeze_L":
                 # Previous phase optimized U; freeze the best U when moving to L updates.
-                self.policy.U = np.array(self._lu_phase_best_components['U'], copy=True)
+                self.policy.factors['U'] = np.array(self._lu_phase_best_components['U'], copy=True)
                 print(
                     "[LU Schedule] Phase switch: freezing best U from previous phase "
                     f"(best_reward={self._lu_phase_best_reward:.2f})."
@@ -442,7 +585,9 @@ class LLMNumOptimAgent:
         params = self.policy.get_parameters()
         if isinstance(params, dict):
             # For factorized policy, log the reconstructed weight
-            logging_file.write(f"Weight matrix (L @ U):\n{self.policy.weight}\n")
+            logging_file.write(
+                f"Weight matrix ({self.policy.get_factor_equation()}):\n{self.policy.weight}\n"
+            )
             logging_file.write(f"Bias: {self.policy.bias}\n")
         else:
             logging_file.write(
@@ -557,6 +702,14 @@ class LLMNumOptimAgent:
     def train_policy(self, world: BaseWorld, logdir):
 
         effective_frozen_factor = self.frozen_factor
+        force_new_matrix_exploration = self._should_force_new_matrix_exploration()
+        if force_new_matrix_exploration:
+            latest_reward = self._latest_recorded_reward()
+            print(
+                "[Exploration Reset] "
+                f"latest reward={latest_reward:.2f} < {self.force_new_matrix_reward_threshold:.2f}. "
+                "Disabling exploitation and requesting a completely new matrix proposal."
+            )
 
         def parse_parameters(input_text):
             # This regex looks for integers or floating-point numbers (including optional sign)
@@ -574,51 +727,59 @@ class LLMNumOptimAgent:
             return np.array(results).reshape(-1)
         
         def parse_factor_matrices(input_text):
-            """Parse L and/or U matrices from LLM output.
-            
-            When effective_frozen_factor == 'L', only U (and bias) are parsed; L is kept fixed.
-            When effective_frozen_factor == 'U', only L (and bias) are parsed; U is kept fixed.
-            When effective_frozen_factor is None, both L and U are parsed.
-            """
+            """Parse decomposition factors from LLM output."""
             self._current_matrix_structure_penalty = 0.0
             self._current_matrix_quality_notes = []
 
+            factor_names = self._factor_names()
+            factor_shapes = self._factor_shapes()
+            current_components = self.policy.get_parameters(return_factors=True)
+
             fallback_components = {
-                'L': self.policy.L.copy(),
-                'U': self.policy.U.copy(),
-                'bias': self.policy.bias.copy(),
+                factor_name: np.array(current_components[factor_name], copy=True)
+                for factor_name in factor_names
             }
+            fallback_components["bias"] = np.array(self.policy.bias, copy=True)
 
             lines = input_text.strip().split('\n')
 
             def detect_section(raw_line):
-                """Detect which section a line denotes (L/U/bias) with flexible heading support."""
+                """Detect factor/bias section headings with flexible markdown support."""
                 if not raw_line:
                     return None
+
                 normalized = raw_line.strip().lower()
-                # Remove common markdown prefixes/suffixes and emphasis wrappers.
                 normalized = re.sub(r'^[#>*\-\s]+', '', normalized)
                 normalized = normalized.strip('`*_ ')
 
                 heading_prefix = r'(?:optimized|updated|new|candidate|final|proposed|fixed|frozen)?\s*'
                 heading_suffix = r'(?:\s*\([^\)]*\))?\s*[:=-]?\s*$'
 
-                if re.match(r'^' + heading_prefix + r'l(?:\s+matrix)?' + heading_suffix, normalized):
-                    return 'L'
-                if re.match(r'^' + heading_prefix + r'u(?:\s+matrix)?' + heading_suffix, normalized):
-                    return 'U'
                 if re.match(r'^' + heading_prefix + r'bias(?:\s+vector)?' + heading_suffix, normalized):
                     return 'bias'
+
+                # Try to extract a factor token from the heading and canonicalize it.
+                heading_match = re.match(
+                    r'^' + heading_prefix + r'([a-zA-Z^\s]+?)' + heading_suffix,
+                    normalized,
+                )
+                if heading_match:
+                    candidate_name = self._canonicalize_factor_name(heading_match.group(1))
+                    if candidate_name in factor_names:
+                        return candidate_name
+
+                # Fallback: direct canonicalization of the whole line.
+                candidate_name = self._canonicalize_factor_name(normalized)
+                if candidate_name in factor_names:
+                    return candidate_name
+
                 return None
-            
-            L_matrix = []
-            U_matrix = []
+
+            parsed_rows = {factor_name: [] for factor_name in factor_names}
+            parsed_vectors = {factor_name: [] for factor_name in factor_names}
             bias_vector = []
-            
             current_section = None
-            expected_L_cols = self.factor_rank
-            expected_U_cols = self.policy.dim_actions
-            
+
             for line in lines:
                 line = line.strip()
                 detected_section = detect_section(line)
@@ -627,90 +788,106 @@ class LLMNumOptimAgent:
                     continue
                 elif 'Explanation:' in line or 'explanation:' in line or line.startswith('Note:'):
                     break
-                
+
                 # Parse numerical values
                 if current_section and line and not line.startswith('Explanation') and not line.startswith('Note'):
                     # Extract numbers from the line (including negative numbers and decimals)
                     numbers = re.findall(r'[+-]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][+-]?\d+)?', line)
                     if numbers:
                         row = [float(x) for x in numbers]
-                        
-                        # Validate row length before adding
-                        if current_section == 'L':
-                            if effective_frozen_factor == 'L':
-                                pass  # Skip – L is frozen; LLM may still include it for reference
-                            elif len(row) == expected_L_cols:
-                                L_matrix.append(row)
-                            else:
-                                print(f"Warning: Skipping L row with {len(row)} values (expected {expected_L_cols}): {row}")
-                        elif current_section == 'U':
-                            if effective_frozen_factor == 'U':
-                                pass  # Skip – U is frozen
-                            elif len(row) == expected_U_cols:
-                                U_matrix.append(row)
-                            else:
-                                print(f"Warning: Skipping U row with {len(row)} values (expected {expected_U_cols}): {row}")
-                        elif current_section == 'bias':
+
+                        if current_section == 'bias':
                             bias_vector.extend(row)
-            
-            print(f"Parsed {len(L_matrix)} L rows, {len(U_matrix)} U rows (frozen_factor={effective_frozen_factor!r})")
-            
-            # For frozen matrices, use the current policy values unchanged
-            if effective_frozen_factor == 'L':
-                L = self.policy.L.copy()
-            else:
-                try:
-                    L = np.array(L_matrix)
-                except ValueError as e:
-                    print(f"ERROR creating L matrix: {e}")
-                    print(f"L_matrix content: {L_matrix}")
-                    return fallback_components
-            
-            if effective_frozen_factor == 'U':
-                U = self.policy.U.copy()
-            else:
-                try:
-                    U = np.array(U_matrix)
-                except ValueError as e:
-                    print(f"ERROR creating U matrix: {e}")
-                    print(f"U_matrix content: {U_matrix}")
-                    return fallback_components
-            
-            bias = np.array(bias_vector).reshape(1, -1) if bias_vector else self.policy.bias
-            
-            print(f"Parsed L shape: {L.shape}, U shape: {U.shape}, bias shape: {bias.shape}")
-            
-            # Validate shapes (always check both, even if one was kept from current policy)
-            expected_L_shape = (self.policy.dim_states, self.factor_rank)
-            expected_U_shape = (self.factor_rank, self.policy.dim_actions)
-            
-            if L.shape != expected_L_shape:
-                print(f"ERROR: L matrix has wrong shape {L.shape}, expected {expected_L_shape}")
-                if effective_frozen_factor != 'L':
-                    print(f"LLM provided {len(L_matrix)} rows, expected {expected_L_shape[0]} rows with {expected_L_shape[1]} columns each")
+                            continue
+
+                        if current_section == effective_frozen_factor:
+                            continue
+
+                        expected_shape = factor_shapes[current_section]
+                        if len(expected_shape) == 1:
+                            parsed_vectors[current_section].extend(row)
+                        else:
+                            expected_cols = expected_shape[1]
+                            if len(row) == expected_cols:
+                                parsed_rows[current_section].append(row)
+                            else:
+                                print(
+                                    f"Warning: Skipping {current_section} row with {len(row)} values "
+                                    f"(expected {expected_cols}): {row}"
+                                )
+
+            parsed_components = {}
+            for factor_name in factor_names:
+                if factor_name == effective_frozen_factor:
+                    parsed_components[factor_name] = np.array(current_components[factor_name], copy=True)
+                    continue
+
+                expected_shape = factor_shapes[factor_name]
+
+                if len(expected_shape) == 1:
+                    factor_value = np.array(parsed_vectors[factor_name], dtype=float)
+                    if factor_value.shape != expected_shape:
+                        print(
+                            f"ERROR: {factor_name} vector has shape {factor_value.shape}, "
+                            f"expected {expected_shape}"
+                        )
+                        return fallback_components
+                    parsed_components[factor_name] = factor_value
+                else:
+                    try:
+                        factor_value = np.array(parsed_rows[factor_name], dtype=float)
+                    except ValueError as exc:
+                        print(f"ERROR creating factor {factor_name}: {exc}")
+                        return fallback_components
+
+                    if factor_value.shape != expected_shape:
+                        if factor_name == "Vt" and factor_value.ndim == 2 and factor_value.T.shape == expected_shape:
+                            factor_value = factor_value.T
+                        else:
+                            print(
+                                f"ERROR: {factor_name} matrix has shape {factor_value.shape}, "
+                                f"expected {expected_shape}"
+                            )
+                            return fallback_components
+                    parsed_components[factor_name] = factor_value
+
+            bias = np.array(bias_vector).reshape(1, -1) if bias_vector else np.array(self.policy.bias, copy=True)
+            if bias.shape != self.policy.bias.shape:
+                print(
+                    f"ERROR: bias has shape {bias.shape}, expected {self.policy.bias.shape}. "
+                    "Keeping previous factors."
+                )
                 return fallback_components
-            
-            if U.shape != expected_U_shape:
-                print(f"ERROR: U matrix has wrong shape {U.shape}, expected {expected_U_shape}")
-                if effective_frozen_factor != 'U':
-                    print(f"LLM provided {len(U_matrix)} rows, expected {expected_U_shape[0]} rows with {expected_U_shape[1]} columns each")
+
+            try:
+                normalized_factors = self.policy.normalize_factor_components(parsed_components)
+            except ValueError as exc:
+                print(f"ERROR: invalid factor proposal: {exc}")
                 return fallback_components
 
             total_penalty_score = 0.0
             quality_notes = []
             structural_issues = []
 
-            if effective_frozen_factor != 'L':
-                l_assessment = self._assess_matrix_structure(L, "L")
-                total_penalty_score += l_assessment["penalty_score"]
-                quality_notes.extend(l_assessment["soft_notes"])
-                structural_issues.extend(l_assessment["hard_issues"])
+            for factor_name in factor_names:
+                if factor_name == effective_frozen_factor:
+                    continue
 
-            if effective_frozen_factor != 'U':
-                u_assessment = self._assess_matrix_structure(U, "U")
-                total_penalty_score += u_assessment["penalty_score"]
-                quality_notes.extend(u_assessment["soft_notes"])
-                structural_issues.extend(u_assessment["hard_issues"])
+                factor_value = np.asarray(normalized_factors[factor_name], dtype=float)
+                if factor_value.ndim == 2:
+                    assessment = self._assess_matrix_structure(factor_value, factor_name)
+                    total_penalty_score += assessment["penalty_score"]
+                    quality_notes.extend(assessment["soft_notes"])
+                    structural_issues.extend(assessment["hard_issues"])
+                else:
+                    # Light regularity penalty for vectors (e.g., S in SVD).
+                    scale = max(1.0, float(np.max(np.abs(factor_value))))
+                    relative_std = float(np.std(factor_value) / scale) if factor_value.size > 1 else 0.0
+                    if factor_value.size > 1 and relative_std < 0.05:
+                        total_penalty_score += float((0.05 - relative_std) * 2.0)
+                        quality_notes.append(
+                            f"{factor_name} vector has low spread (relative std {relative_std:.3f})."
+                        )
 
             if structural_issues:
                 print("ERROR: Rejecting matrix proposal due to structural invalidation:")
@@ -728,16 +905,27 @@ class LLMNumOptimAgent:
                 )
                 for note in self._current_matrix_quality_notes:
                     print(f" - {note}")
-            
-            print(f"✓ Shapes validated correctly")
-            if effective_frozen_factor != 'L':
-                print(f"L matrix:\n{L}")
-            if effective_frozen_factor != 'U':
-                print(f"U matrix:\n{U}")
-            
-            return {'L': L, 'U': U, 'bias': bias}
+
+            print("✓ Shapes validated correctly")
+            for factor_name in factor_names:
+                if factor_name != effective_frozen_factor:
+                    print(f"{factor_name} shape: {normalized_factors[factor_name].shape}")
+
+            parsed_payload = {
+                factor_name: normalized_factors[factor_name]
+                for factor_name in factor_names
+            }
+            parsed_payload["bias"] = bias
+            return parsed_payload
 
         def str_nd_examples(replay_buffer: EpisodeRewardBufferNoBias, n):
+            if force_new_matrix_exploration:
+                return (
+                    "Exploration reset mode is active because the latest reward dropped below -100.\n"
+                    "Do NOT exploit or reuse prior parameter structures.\n"
+                    "Propose a completely new parameter matrix with a distinctly different value layout.\n"
+                )
+
             selected_entries = self._select_prompt_replay_entries(replay_buffer)
             all_parameters = []
             for weights, reward in selected_entries:
@@ -757,50 +945,62 @@ class LLMNumOptimAgent:
             return text
         
         def str_factor_examples(replay_buffer: EpisodeRewardBufferNoBias):
-            """Format examples showing L/U matrices and rewards.
-            
-            When effective_frozen_factor is set, only the optimizable matrix is shown per
-            attempt and the frozen matrix is displayed once at the top.
-            """
-            # ---- Frozen-matrix preamble ----
+            """Format examples showing decomposition factors and rewards."""
+            factor_names = self._factor_names()
+
+            def _format_factor_block(name, value):
+                value = np.asarray(value)
+                block = f"{name} factor:\n"
+                if value.ndim == 1:
+                    block += ", ".join([f"{x:.2f}" for x in value]) + "\n"
+                else:
+                    for row in value:
+                        block += ", ".join([f"{x:.2f}" for x in row]) + "\n"
+                return block
+
+            # ---- Frozen-factor preamble ----
             preamble = ""
-            if effective_frozen_factor == 'L' and self.policy.L is not None:
-                preamble += "FIXED L matrix (stays constant – do NOT change this):\n"
-                for row in self.policy.L:
-                    preamble += ", ".join([f"{x:.2f}" for x in row]) + "\n"
-                preamble += "\n"
-            elif effective_frozen_factor == 'U' and self.policy.U is not None:
-                preamble += "FIXED U matrix (stays constant – do NOT change this):\n"
-                for row in self.policy.U:
-                    preamble += ", ".join([f"{x:.2f}" for x in row]) + "\n"
-                preamble += "\n"
-            
+            if effective_frozen_factor is not None:
+                current = self.policy.get_parameters(return_factors=True)
+                if effective_frozen_factor in current:
+                    preamble += (
+                        f"FIXED {effective_frozen_factor} factor "
+                        "(stays constant - do NOT change this):\n"
+                    )
+                    preamble += _format_factor_block(
+                        effective_frozen_factor,
+                        current[effective_frozen_factor],
+                    )
+                    preamble += "\n"
+
+            if force_new_matrix_exploration:
+                return (
+                    preamble
+                    + "Exploration reset mode is active because the latest reward dropped below -100.\n"
+                    + "Do NOT exploit or reuse previous factor structures.\n"
+                    + "Generate completely new values for all editable factors.\n"
+                )
+
             selected_entries = self._select_prompt_replay_entries(replay_buffer)
 
             if len(selected_entries) == 0:
                 return preamble + "(No previous attempts yet)\n"
-            
+
             text = preamble
             if self._is_groq_mode():
                 text += "(Groq mode) Showing latest 4 attempts + top 3 historical rewards.\n"
             text += f"Total previous attempts shown: {len(selected_entries)}\n"
             text += "=" * 60 + "\n\n"
-            
+
             for idx, (weights, reward) in enumerate(selected_entries, 1):
-                # weights should be a dict with L, U, bias
-                if isinstance(weights, dict) and 'L' in weights:
-                    L = weights['L']
-                    U = weights['U']
+                if isinstance(weights, dict) and all(name in weights for name in factor_names):
                     text += f"Attempt #{idx}:\n"
-                    # Only show the matrix the LLM is allowed to change
-                    if effective_frozen_factor != 'L':
-                        text += "L matrix:\n"
-                        for row in L:
-                            text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
-                    if effective_frozen_factor != 'U':
-                        text += "U matrix:\n"
-                        for row in U:
-                            text += ", ".join([f"{x:.2f}" for x in row]) + "\n"
+
+                    for factor_name in factor_names:
+                        if factor_name == effective_frozen_factor:
+                            continue
+                        text += _format_factor_block(factor_name, weights[factor_name])
+
                     text += f"f(params): {reward:.2f}\n\n"
                 else:
                     # Fallback to flat parameters
@@ -808,7 +1008,7 @@ class LLMNumOptimAgent:
                     text += f"Attempt #{idx}:\n"
                     text += "params: " + ", ".join([f"{x:.2g}" for x in parameters[:10]]) + "...\n"
                     text += f"f(params): {reward:.2f}\n\n"
-            
+
             text += "=" * 60 + "\n"
             return text
 
@@ -819,7 +1019,11 @@ class LLMNumOptimAgent:
         current_frozen_factor = self.frozen_factor
         schedule_context = None
         schedule_phase = None
-        if self.use_factorized_policy and self.enable_alternating_lu_schedule:
+        if (
+            self.use_factorized_policy
+            and self.decomposition_type == "lu"
+            and self.enable_alternating_lu_schedule
+        ):
             schedule_period = self.lu_schedule_l_episodes + self.lu_schedule_u_iterations
             schedule_step = self.training_episodes % schedule_period
             if schedule_step < self.lu_schedule_l_episodes:
@@ -850,30 +1054,74 @@ class LLMNumOptimAgent:
 
         effective_frozen_factor = current_frozen_factor
         reward_delta_context = self._build_reward_delta_context(self.replay_buffer)
+        reward_delta_context["force_new_matrix_exploration"] = force_new_matrix_exploration
+        reward_delta_context["force_new_matrix_threshold"] = self.force_new_matrix_reward_threshold
+        reward_delta_context["force_new_matrix_index_delta"] = self.force_exploration_min_index_delta
+        reward_delta_context["force_new_matrix_reference_count"] = self.force_exploration_reference_count
         
         if self.use_factorized_policy:
             self._current_matrix_structure_penalty = 0.0
             self._current_matrix_quality_notes = []
 
-            # Two-matrix policy: LLM generates L and/or U, policy = L @ U
-            new_factor_components, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
-                str_factor_examples(self.replay_buffer),
-                parse_factor_matrices,
-                self.training_episodes,
-                self.rank,
-                self.optimum,
-                self.search_step_size,
-                dim_state=self.policy.dim_states,
-                dim_action=self.policy.dim_actions,
-                factor_rank=self.factor_rank,
-                use_factorized=True,
-                frozen_factor=current_frozen_factor,
-                schedule_context=schedule_context,
-                reward_context=reward_delta_context,
+            # Factorized policy: LLM generates decomposition factors, then weight is reconstructed.
+            llm_attempt_budget = (
+                self.force_exploration_max_llm_attempts
+                if force_new_matrix_exploration
+                else 1
             )
-            self.api_call_time += api_time
-            
-            print(f"L shape: {new_factor_components['L'].shape}, U shape: {new_factor_components['U'].shape}")
+            new_factor_components = None
+            reasoning = None
+            last_validation_reason = None
+
+            for llm_attempt_idx in range(llm_attempt_budget):
+                candidate_components, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                    str_factor_examples(self.replay_buffer),
+                    parse_factor_matrices,
+                    self.training_episodes,
+                    self.rank,
+                    self.optimum,
+                    self.search_step_size,
+                    dim_state=self.policy.dim_states,
+                    dim_action=self.policy.dim_actions,
+                    factor_rank=self.factor_rank,
+                    use_factorized=True,
+                    decomposition_type=self.decomposition_type,
+                    factor_names=self._factor_names(),
+                    frozen_factor=current_frozen_factor,
+                    schedule_context=schedule_context,
+                    reward_context=reward_delta_context,
+                )
+                self.api_call_time += api_time
+
+                if force_new_matrix_exploration:
+                    is_valid, validation_reason = self._validate_forced_exploration_candidate(
+                        candidate_components,
+                        effective_frozen_factor=effective_frozen_factor,
+                    )
+                    if not is_valid:
+                        last_validation_reason = validation_reason
+                        print(
+                            "[Exploration Reset] Rejected factor proposal "
+                            f"attempt {llm_attempt_idx + 1}/{llm_attempt_budget}: {validation_reason}"
+                        )
+                        continue
+
+                new_factor_components = candidate_components
+                reasoning = candidate_reasoning
+                break
+
+            if new_factor_components is None:
+                raise ValueError(
+                    "Forced exploration failed to produce a strictly unique factor proposal. "
+                    f"Last rejection: {last_validation_reason}"
+                )
+
+            factor_shape_log = {
+                factor_name: np.asarray(new_factor_components[factor_name]).shape
+                for factor_name in self._factor_names()
+                if factor_name in new_factor_components
+            }
+            print(f"Factor shapes: {factor_shape_log}")
             self.policy.update_policy(factor_components=new_factor_components)
             print(f"Weight shape after update: {self.policy.weight.shape}")
             
@@ -881,16 +1129,49 @@ class LLMNumOptimAgent:
             new_parameter_list = new_factor_components
         else:
             # Use regular parameter optimization
-            new_parameter_list, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
-                str_nd_examples(self.replay_buffer, self.rank),
-                parse_parameters,
-                self.training_episodes,
-                self.rank,
-                self.optimum,
-                self.search_step_size,
-                reward_context=reward_delta_context,
+            llm_attempt_budget = (
+                self.force_exploration_max_llm_attempts
+                if force_new_matrix_exploration
+                else 1
             )
-            self.api_call_time += api_time
+            new_parameter_list = None
+            reasoning = None
+            last_validation_reason = None
+
+            for llm_attempt_idx in range(llm_attempt_budget):
+                candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                    str_nd_examples(self.replay_buffer, self.rank),
+                    parse_parameters,
+                    self.training_episodes,
+                    self.rank,
+                    self.optimum,
+                    self.search_step_size,
+                    reward_context=reward_delta_context,
+                )
+                self.api_call_time += api_time
+
+                if force_new_matrix_exploration:
+                    is_valid, validation_reason = self._validate_forced_exploration_candidate(
+                        candidate_parameters,
+                        effective_frozen_factor=None,
+                    )
+                    if not is_valid:
+                        last_validation_reason = validation_reason
+                        print(
+                            "[Exploration Reset] Rejected parameter proposal "
+                            f"attempt {llm_attempt_idx + 1}/{llm_attempt_budget}: {validation_reason}"
+                        )
+                        continue
+
+                new_parameter_list = candidate_parameters
+                reasoning = candidate_reasoning
+                break
+
+            if new_parameter_list is None:
+                raise ValueError(
+                    "Forced exploration failed to produce a strictly unique parameter proposal. "
+                    f"Last rejection: {last_validation_reason}"
+                )
 
             print(self.policy.get_parameters().shape)
             print(new_parameter_list.shape)
@@ -936,6 +1217,7 @@ class LLMNumOptimAgent:
 
         if (
             self.use_factorized_policy
+            and self.decomposition_type == "lu"
             and self.enable_alternating_lu_schedule
             and schedule_phase is not None
         ):
@@ -1037,52 +1319,55 @@ class LLMNumOptimAgent:
         plt.close()
         print(f"Saved policy heatmap to {plot_filename}")
         
-        # If using factorized policy, also save L and U heatmaps (generated iteratively each episode)
-        if self.use_factorized_policy and hasattr(self.policy, 'L') and self.policy.L is not None:
-            fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-            
-            # L matrix
-            sns.heatmap(
-                self.policy.L,
-                annot=True,
-                fmt='.2f',
-                cmap='viridis',
-                ax=axes[0],
-                cbar_kws={'label': 'Value'}
-            )
-            axes[0].set_title('L Matrix')
-            axes[0].set_xlabel('Factor Rank Dimension')
-            axes[0].set_ylabel('State Dimension')
-            
-            # U matrix
-            sns.heatmap(
-                self.policy.U,
-                annot=True,
-                fmt='.2f',
-                cmap='viridis',
-                ax=axes[1],
-                cbar_kws={'label': 'Value'}
-            )
-            axes[1].set_title('U Matrix')
-            axes[1].set_xlabel('Action Dimension')
-            axes[1].set_ylabel('Factor Rank Dimension')
-            
-            # Reconstructed weight (L @ U)
+        # If using factorized policy, also save decomposition factor heatmaps.
+        if self.use_factorized_policy and self.policy.get_factor_names():
+            factor_components = self.policy.get_parameters(return_factors=True)
+            factor_names = self.policy.get_factor_names()
+            subplot_count = len(factor_names) + 1
+
+            fig, axes = plt.subplots(1, subplot_count, figsize=(6 * subplot_count, 5))
+            if subplot_count == 2:
+                axes = [axes[0], axes[1]]
+
+            for idx, factor_name in enumerate(factor_names):
+                factor_value = np.asarray(factor_components[factor_name], dtype=float)
+                if factor_value.ndim == 1:
+                    factor_plot = factor_value.reshape(1, -1)
+                    y_label = 'Component'
+                else:
+                    factor_plot = factor_value
+                    y_label = 'Row'
+
+                sns.heatmap(
+                    factor_plot,
+                    annot=True,
+                    fmt='.2f',
+                    cmap='viridis',
+                    ax=axes[idx],
+                    cbar_kws={'label': 'Value'}
+                )
+                axes[idx].set_title(f'{factor_name} Factor')
+                axes[idx].set_xlabel('Column')
+                axes[idx].set_ylabel(y_label)
+
             sns.heatmap(
                 weight_matrix,
                 annot=True,
                 fmt='.2f',
                 cmap='viridis',
-                ax=axes[2],
+                ax=axes[-1],
                 cbar_kws={'label': 'Value'}
             )
-            axes[2].set_title('Policy Weight (L @ U)')
-            axes[2].set_xlabel('Action Dimension')
-            axes[2].set_ylabel('State Dimension')
-            
-            plt.suptitle(f'Factorized Policy Matrices - Episode {self.training_episodes}', fontsize=16)
+            axes[-1].set_title(f"Policy Weight ({self.policy.get_factor_equation()})")
+            axes[-1].set_xlabel('Action Dimension')
+            axes[-1].set_ylabel('State Dimension')
+
+            plt.suptitle(
+                f"{self.decomposition_type.upper()} Factorized Policy - Episode {self.training_episodes}",
+                fontsize=16,
+            )
             plt.tight_layout()
-            
+
             factor_plot_filename = f"{logdir}/policy_factor_heatmap_ep{self.training_episodes}.png"
             plt.savefig(factor_plot_filename, dpi=150, bbox_inches='tight')
             plt.close()

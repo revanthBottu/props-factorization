@@ -33,6 +33,7 @@ def run_training_loop(
     env_kwargs=None,
     use_factorized_policy=False,
     factor_rank=None,
+    decomposition_type="lu",
     frozen_factor=None,
     enable_alternating_lu_schedule=False,
     lu_schedule_l_episodes=5,
@@ -56,7 +57,11 @@ def run_training_loop(
 
 
         if task == "cont_space_llm_num_optim":
-            print(f"[DEBUG runner] use_factorized_policy={use_factorized_policy}, factor_rank={factor_rank}")
+            print(
+                "[DEBUG runner] "
+                f"use_factorized_policy={use_factorized_policy}, "
+                f"factor_rank={factor_rank}, decomposition_type={decomposition_type}"
+            )
             agent = LLMNumOptimAgent(
                 logdir,
                 dim_actions,
@@ -72,6 +77,7 @@ def run_training_loop(
                 search_step_size,
                 use_factorized_policy=use_factorized_policy,
                 factor_rank=factor_rank,
+                decomposition_type=decomposition_type,
                 frozen_factor=frozen_factor,
                 enable_alternating_lu_schedule=enable_alternating_lu_schedule,
                 lu_schedule_l_episodes=lu_schedule_l_episodes,

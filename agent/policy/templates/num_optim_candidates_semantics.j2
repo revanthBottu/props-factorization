@@ -22,6 +22,15 @@ f(params) is the episodic reward of the policy.
 1. **Do not propose previously seen params.**
 2. **The global optimal reward should be around {{ optimum }}.** If you are below that, this is just a local optimum. You should explore instead of exploiting.
 3. Search all the possible values of params.
+4. If the latest reward delta is far below zero (<= {{ reward_delta_far_below_zero_threshold }}), increase exploration and try a broader move.
+{% if reward_delta_last_vs_previous_far_below_zero %}
+5. **Current signal:** the latest reward delta is far below zero. Prioritize exploration in this step.
+{% endif %}
+
+# Reward Delta Signals:
+- Last episode minus previous episode: {{ reward_delta_last_vs_previous }}
+- Last episode minus best episode: {{ reward_delta_last_vs_best }}
+- Previous episode minus zero: {{ reward_delta_previous_vs_zero }}
 
 Next, you will see examples of params, there episodic reward f(params), and the trajectories the params yield.
 {{ episode_reward_buffer_string }}

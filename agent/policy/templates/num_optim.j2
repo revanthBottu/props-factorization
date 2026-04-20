@@ -19,7 +19,17 @@ Your goal is to propose input values that efficiently lead us to the global maxi
 1. **Do not propose previously seen params.**
 2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. You should explore instead of exploiting.
 3. Search both positive and negative values. **During exploration, use search step size of {{ step_size }}**.
+4. If the latest reward delta is far below zero (<= {{ reward_delta_far_below_zero_threshold }}), increase exploration and try a broader move.
+{% if reward_delta_last_vs_previous_far_below_zero %}
+5. **Current signal:** the latest reward delta is far below zero. Prioritize exploration in this step.
+{% endif %}
 
+# Reward Delta Signals:
+- Last episode minus previous episode: {{ reward_delta_last_vs_previous }}
+- Last episode minus best episode: {{ reward_delta_last_vs_best }}
+- Previous episode minus zero: {{ reward_delta_previous_vs_zero }}
+
+Use the above reward deltas to decide how much to explore versus exploit current trends. Generally, make pivots off the best matrix to maximize positive difference above zero.
 
 Next, you will see examples of params and f(params) pairs.
 {{ episode_reward_buffer_string }}

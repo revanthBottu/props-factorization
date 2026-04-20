@@ -22,3 +22,7 @@ factor_rank: 2  # Inner dimension for L @ U (4 states, 2 actions, so 2 is good)
 decomposition_type: lu  # Options: lu | qr | svd
 # frozen_factor: null | "L" | "U"  (null = both updated; "L" = freeze L; "U" = freeze U)
 frozen_factor: null
+matrix_init_mode: near_zero
+near_zero_init_scale: 0.15
+near_zero_init_min_abs: 0.02
+near_zero_init_decimals: 2

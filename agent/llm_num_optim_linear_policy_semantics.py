@@ -31,6 +31,10 @@ class LLMNumOptimSemanticAgent:
         optimum,
         search_step_size,
         env_desc_file=None,
+        matrix_init_mode: str = "near_zero",
+        near_zero_init_scale: float = 0.15,
+        near_zero_init_min_abs: float = 0.02,
+        near_zero_init_decimals: int = 2,
         seed: int = None,
     ):
         self.start_time = time.process_time()
@@ -43,6 +47,10 @@ class LLMNumOptimSemanticAgent:
         self.optimum = optimum
         self.search_step_size = search_step_size
         self.env_desc_file = env_desc_file
+        self.matrix_init_mode = str(matrix_init_mode).strip().lower()
+        self.near_zero_init_scale = float(near_zero_init_scale)
+        self.near_zero_init_min_abs = float(near_zero_init_min_abs)
+        self.near_zero_init_decimals = int(near_zero_init_decimals)
         self.seed = seed if seed is not None else 42
 
         if not self.bias:
@@ -53,10 +61,22 @@ class LLMNumOptimSemanticAgent:
 
         if not self.bias:
             self.policy = LinearPolicyNoBias(
-                dim_actions=dim_action, dim_states=dim_state
+                dim_actions=dim_action,
+                dim_states=dim_state,
+                matrix_init_mode=self.matrix_init_mode,
+                near_zero_init_scale=self.near_zero_init_scale,
+                near_zero_init_min_abs=self.near_zero_init_min_abs,
+                near_zero_init_decimals=self.near_zero_init_decimals,
             )
         else:
-            self.policy = LinearPolicy(dim_actions=dim_action, dim_states=dim_state)
+            self.policy = LinearPolicy(
+                dim_actions=dim_action,
+                dim_states=dim_state,
+                matrix_init_mode=self.matrix_init_mode,
+                near_zero_init_scale=self.near_zero_init_scale,
+                near_zero_init_min_abs=self.near_zero_init_min_abs,
+                near_zero_init_decimals=self.near_zero_init_decimals,
+            )
         self.replay_buffer = EpisodeRewardBufferNoBias(max_size=max_traj_count)
         self.traj_buffer = ReplayBuffer(max_traj_count, max_traj_length)
         self.llm_brain = LLMBrain(

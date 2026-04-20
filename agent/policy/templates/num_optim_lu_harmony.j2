@@ -35,6 +35,15 @@ Search guidance:
 - Exploration step size target: {{ step_size }}.
 - Do not propose previously seen matrices.
 - Small LU changes can create large changes in params = L @ U.
+- If the latest reward delta is far below zero (<= {{ reward_delta_far_below_zero_threshold }}), prioritize exploration and broader updates.
+{% if reward_delta_last_vs_previous_far_below_zero %}
+- Current signal: latest reward delta is far below zero. Prioritize exploration in this step.
+{% endif %}
+
+Reward delta signals:
+- Last episode minus previous episode: {{ reward_delta_last_vs_previous }}
+- Last episode minus best episode: {{ reward_delta_last_vs_best }}
+- Previous episode minus zero: {{ reward_delta_previous_vs_zero }}
 
 Output contract (no extra text):
 {% if frozen_factor == 'L' %}
@@ -62,6 +71,11 @@ Never include markdown/code fences.
 
 <|start|>user
 Iteration: {{ step_number }} / 400
+
+Reward delta snapshot:
+- Last minus previous: {{ reward_delta_last_vs_previous }}
+- Last minus best: {{ reward_delta_last_vs_best }}
+- Previous minus zero: {{ reward_delta_previous_vs_zero }}
 
 Prior attempts and rewards:
 {{ episode_reward_buffer_string }}

@@ -734,6 +734,68 @@ class LLMBrain:
 
         return new_parameters_list
 
+    def _extract_reward_values(self, episode_reward_buffer):
+        text = str(episode_reward_buffer) if episode_reward_buffer is not None else ""
+        number_pattern = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
+
+        reward_matches = re.findall(
+            rf"f\(params\)\s*:\s*({number_pattern})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not reward_matches:
+            reward_matches = re.findall(
+                rf"total\s+reward\s*[:=]\s*({number_pattern})",
+                text,
+                flags=re.IGNORECASE,
+            )
+
+        rewards = []
+        for reward_str in reward_matches:
+            try:
+                rewards.append(float(reward_str))
+            except (TypeError, ValueError):
+                continue
+        return rewards
+
+    def _build_reward_delta_context(self, episode_reward_buffer):
+        rewards = self._extract_reward_values(episode_reward_buffer)
+
+        last_reward = rewards[-1] if len(rewards) >= 1 else None
+        previous_reward = rewards[-2] if len(rewards) >= 2 else None
+        best_reward = max(rewards) if rewards else None
+
+        delta_last_vs_previous = (
+            None
+            if last_reward is None or previous_reward is None
+            else last_reward - previous_reward
+        )
+        delta_last_vs_best = (
+            None
+            if last_reward is None or best_reward is None
+            else last_reward - best_reward
+        )
+        delta_previous_vs_zero = None if previous_reward is None else previous_reward
+
+        far_below_zero_threshold = -10.0
+        delta_last_vs_previous_far_below_zero = (
+            delta_last_vs_previous is not None
+            and delta_last_vs_previous <= far_below_zero_threshold
+        )
+
+        def _format_delta(value):
+            if value is None or not math.isfinite(value):
+                return "N/A"
+            return f"{value:.2f}"
+
+        return {
+            "reward_delta_last_vs_previous": _format_delta(delta_last_vs_previous),
+            "reward_delta_last_vs_best": _format_delta(delta_last_vs_best),
+            "reward_delta_previous_vs_zero": _format_delta(delta_previous_vs_zero),
+            "reward_delta_last_vs_previous_far_below_zero": delta_last_vs_previous_far_below_zero,
+            "reward_delta_far_below_zero_threshold": f"{far_below_zero_threshold:.2f}",
+        }
+
     def llm_update_parameters(self, parameters, replay_buffer, parse_parameters=None):
         self.reset_llm_conversation()
 
@@ -765,7 +827,10 @@ class LLMBrain:
         self.reset_llm_conversation()
 
         system_prompt = self.llm_si_template.render(
-            {"episode_reward_buffer_string": str(episode_reward_buffer)}
+            {
+                "episode_reward_buffer_string": str(episode_reward_buffer),
+                **self._build_reward_delta_context(episode_reward_buffer),
+            }
         )
 
         self.add_llm_conversation(system_prompt, "user")
@@ -822,13 +887,43 @@ class LLMBrain:
         force_new_matrix_threshold = reward_context.get("force_new_matrix_threshold", -100.0)
         force_new_matrix_index_delta = reward_context.get("force_new_matrix_index_delta", 0.35)
         force_new_matrix_reference_count = reward_context.get("force_new_matrix_reference_count", 5)
+        reward_dip_reset_to_best_active = bool(
+            reward_context.get("reward_dip_reset_to_best_active", False)
+        )
+        reward_dip_reset_threshold = reward_context.get("reward_dip_reset_threshold", -200.0)
+        reward_dip_latest_reward = reward_context.get("reward_dip_latest_reward")
+        reward_dip_best_reward = reward_context.get("reward_dip_best_reward")
+        matrix_delta_soft_signal_enabled = bool(
+            reward_context.get("matrix_delta_soft_signal_enabled", False)
+        )
+        matrix_delta_soft_signal_active = bool(
+            reward_context.get("matrix_delta_soft_signal_active", False)
+        )
+        matrix_delta_soft_limit = reward_context.get("matrix_delta_soft_limit")
+        matrix_delta_soft_exceed_count = reward_context.get("matrix_delta_soft_exceed_count")
+        matrix_delta_soft_max_abs_delta = reward_context.get("matrix_delta_soft_max_abs_delta")
+        matrix_warning_signal_active = bool(
+            reward_context.get("matrix_warning_signal_active", False)
+        )
+        matrix_warning_signal_notes = reward_context.get("matrix_warning_signal_notes") or []
+        matrix_invalid_reset_active = bool(
+            reward_context.get("matrix_invalid_reset_active", False)
+        )
+        matrix_invalid_reset_reason = reward_context.get("matrix_invalid_reset_reason")
+        svd_reset_active = bool(reward_context.get("svd_reset_active", False))
+        svd_reset_latest_reward = reward_context.get("svd_reset_latest_reward")
+        svd_reset_sigma = bool(reward_context.get("svd_reset_sigma", False))
+        svd_reset_uv = bool(reward_context.get("svd_reset_uv", False))
+        svd_sigma_reset_threshold = reward_context.get("svd_sigma_reset_threshold", -100.0)
+        svd_uv_reset_threshold = reward_context.get("svd_uv_reset_threshold", -1000.0)
         factor_value_bound = 6.0
-        if factor_rank is not None and factor_rank > 0:
+        if decomposition_type != "svd" and factor_rank is not None and factor_rank > 0:
             factor_value_bound = math.sqrt(6.0 / float(factor_rank))
 
         system_prompt = self.llm_si_template.render(
             {
                 "episode_reward_buffer_string": str(episode_reward_buffer),
+                **self._build_reward_delta_context(episode_reward_buffer),
                 "step_number": str(step_number),
                 "rank": rank,
                 "optimum": str(optimum),
@@ -857,8 +952,121 @@ class LLMBrain:
                 "force_new_matrix_threshold": force_new_matrix_threshold,
                 "force_new_matrix_index_delta": force_new_matrix_index_delta,
                 "force_new_matrix_reference_count": force_new_matrix_reference_count,
+                "reward_dip_reset_to_best_active": reward_dip_reset_to_best_active,
+                "reward_dip_reset_threshold": reward_dip_reset_threshold,
+                "reward_dip_latest_reward": reward_dip_latest_reward,
+                "reward_dip_best_reward": reward_dip_best_reward,
+                "matrix_delta_soft_signal_enabled": matrix_delta_soft_signal_enabled,
+                "matrix_delta_soft_signal_active": matrix_delta_soft_signal_active,
+                "matrix_delta_soft_limit": matrix_delta_soft_limit,
+                "matrix_delta_soft_exceed_count": matrix_delta_soft_exceed_count,
+                "matrix_delta_soft_max_abs_delta": matrix_delta_soft_max_abs_delta,
+                "matrix_warning_signal_active": matrix_warning_signal_active,
+                "matrix_warning_signal_notes": matrix_warning_signal_notes,
+                "matrix_invalid_reset_active": matrix_invalid_reset_active,
+                "matrix_invalid_reset_reason": matrix_invalid_reset_reason,
+                "svd_reset_active": svd_reset_active,
+                "svd_reset_latest_reward": svd_reset_latest_reward,
+                "svd_reset_sigma": svd_reset_sigma,
+                "svd_reset_uv": svd_reset_uv,
+                "svd_sigma_reset_threshold": svd_sigma_reset_threshold,
+                "svd_uv_reset_threshold": svd_uv_reset_threshold,
             }
         )
+
+        if reward_dip_reset_to_best_active:
+            try:
+                dip_threshold_text = f"{float(reward_dip_reset_threshold):.2f}"
+            except (TypeError, ValueError):
+                dip_threshold_text = "-200.00"
+            try:
+                latest_reward_text = f"{float(reward_dip_latest_reward):.2f}"
+            except (TypeError, ValueError):
+                latest_reward_text = "N/A"
+            try:
+                best_reward_text = f"{float(reward_dip_best_reward):.2f}"
+            except (TypeError, ValueError):
+                best_reward_text = "N/A"
+
+            system_prompt += (
+                "\n\n[REWARD DIP RESET BASELINE]\n"
+                f"Latest reward ({latest_reward_text}) dropped below {dip_threshold_text}.\n"
+                f"Policy was reset to best-so-far baseline (reward={best_reward_text}).\n"
+                "Build off this baseline: preserve core structure that likely helped, then make measured exploratory edits.\n"
+                "Do not jump to unrelated random structures unless repeatedly failing."
+            )
+
+        if svd_reset_active:
+            try:
+                svd_latest_reward_text = f"{float(svd_reset_latest_reward):.2f}"
+            except (TypeError, ValueError):
+                svd_latest_reward_text = "N/A"
+
+            try:
+                sigma_threshold_text = f"{float(svd_sigma_reset_threshold):.2f}"
+            except (TypeError, ValueError):
+                sigma_threshold_text = "-100.00"
+
+            try:
+                uv_threshold_text = f"{float(svd_uv_reset_threshold):.2f}"
+            except (TypeError, ValueError):
+                uv_threshold_text = "-1000.00"
+
+            reset_parts = []
+            if svd_reset_sigma:
+                reset_parts.append("S was reset to near-zero")
+            if svd_reset_uv:
+                reset_parts.append("U and Vt were reset to near-zero")
+            reset_text = "; ".join(reset_parts) if reset_parts else "No factor reset details available"
+
+            system_prompt += (
+                "\n\n[SVD LOW-REWARD RESET]\n"
+                f"Latest reward was {svd_latest_reward_text}. Thresholds: sigma<= {sigma_threshold_text}, U/Vt<= {uv_threshold_text}.\n"
+                f"Applied reset: {reset_text}.\n"
+                "The baseline factors shown in the examples are already reset. Use them as the starting point for this proposal."
+            )
+
+        if matrix_delta_soft_signal_enabled and matrix_delta_soft_signal_active:
+            try:
+                limit_text = f"{float(matrix_delta_soft_limit):.4f}"
+            except (TypeError, ValueError):
+                limit_text = "N/A"
+            try:
+                exceed_text = str(int(matrix_delta_soft_exceed_count))
+            except (TypeError, ValueError):
+                exceed_text = "N/A"
+            try:
+                max_delta_text = f"{float(matrix_delta_soft_max_abs_delta):.4f}"
+            except (TypeError, ValueError):
+                max_delta_text = "N/A"
+
+            system_prompt += (
+                "\n\n[SOFT DELTA-LIMIT SIGNAL]\n"
+                "The last proposal exceeded preferred per-entry delta bounds.\n"
+                f"Preferred |delta| <= {limit_text}; exceeded entries={exceed_text}; max observed |delta|={max_delta_text}.\n"
+                "No hard clipping is applied. Use this as guidance to smooth and coordinate updates while still exploring."
+            )
+
+        if matrix_warning_signal_active and len(matrix_warning_signal_notes) > 0:
+            warning_lines = []
+            for note in matrix_warning_signal_notes[:10]:
+                warning_lines.append(f"- {note}")
+            warning_block = "\n".join(warning_lines)
+            system_prompt += (
+                "\n\n[MATRIX WARNING SIGNALS]\n"
+                "Recent matrix diagnostics detected potentially problematic structure patterns.\n"
+                "Treat these as warnings and adjust your next proposal accordingly (no hard invalidation from these alone).\n"
+                f"{warning_block}"
+            )
+
+        if matrix_invalid_reset_active:
+            reason_text = str(matrix_invalid_reset_reason or "Invalid matrix proposal.")
+            system_prompt += (
+                "\n\n[INVALID MATRIX RESET]\n"
+                "The previous proposal was invalid and the baseline was reset to near-zero values before this retry.\n"
+                f"Invalidation reason: {reason_text}\n"
+                "Only bad-shape proposals and exact full-matrix duplicates are invalidated."
+            )
 
         if force_new_matrix_exploration:
             try:
@@ -924,6 +1132,7 @@ class LLMBrain:
         system_prompt = self.llm_si_template.render(
             {
                 "episode_reward_buffer_string": str(episode_reward_buffer),
+                **self._build_reward_delta_context(episode_reward_buffer),
                 "step_number": str(step_number),
                 "actions": actions,
                 "rank": num_states,
@@ -966,6 +1175,7 @@ class LLMBrain:
             {
                 "expert_demonstration_string": demonstrations_str,
                 "episode_reward_buffer_string": str(episode_reward_buffer),
+                **self._build_reward_delta_context(episode_reward_buffer),
                 "step_number": str(step_number),
                 "search_std": str(search_std),
             }
@@ -1005,6 +1215,7 @@ class LLMBrain:
         system_prompt = self.llm_si_template.render(
             {
                 "episode_reward_buffer_string": str(episode_reward_buffer),
+                **self._build_reward_delta_context(episode_reward_buffer),
                 "step_number": str(step_number),
                 "search_std": str(search_std),
                 "anchor_parameters": str(anchor_parameters),
@@ -1047,6 +1258,7 @@ class LLMBrain:
         system_prompt = self.llm_si_template.render(
             {
                 "episode_reward_buffer_string": str(episode_reward_buffer),
+                **self._build_reward_delta_context(episode_reward_buffer),
                 "step_number": str(step_number),
                 "search_std": str(search_std),
                 "anchor_parameters": str(anchor_parameters),
@@ -1088,6 +1300,7 @@ class LLMBrain:
         system_prompt = self.llm_si_template.render(
             {
                 "episode_reward_buffer_string": str(episode_reward_buffer),
+                **self._build_reward_delta_context(episode_reward_buffer),
                 "step_number": str(step_number),
                 "search_std": str(search_std),
                 "anchor_parameters": str(anchor_parameters),
@@ -1132,6 +1345,7 @@ class LLMBrain:
         system_prompt = self.llm_si_template.render(
             {
                 "episode_reward_buffer_string": str(episode_reward_buffer),
+                **self._build_reward_delta_context(episode_reward_buffer),
                 "env_description": env_desc_file,
                 "step_number": str(step_number),
                 "rank": rank,

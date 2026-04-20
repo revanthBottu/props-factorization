@@ -29,6 +29,10 @@ class LLMNumOptimRndmPrjAgent:
         rank,
         bias,
         optimum,
+        matrix_init_mode: str = "near_zero",
+        near_zero_init_scale: float = 0.15,
+        near_zero_init_min_abs: float = 0.02,
+        near_zero_init_decimals: int = 2,
         seed: int = None,
     ):
         self.start_time = time.process_time()
@@ -39,6 +43,10 @@ class LLMNumOptimRndmPrjAgent:
         self.dim_state = dim_state
         self.bias = bias
         self.optimum = optimum
+        self.matrix_init_mode = str(matrix_init_mode).strip().lower()
+        self.near_zero_init_scale = float(near_zero_init_scale)
+        self.near_zero_init_min_abs = float(near_zero_init_min_abs)
+        self.near_zero_init_decimals = int(near_zero_init_decimals)
         self.seed = seed if seed is not None else 42
 
         if not self.bias:
@@ -53,9 +61,23 @@ class LLMNumOptimRndmPrjAgent:
         self.rank = rank
         
         if not self.bias:
-            self.policy = LinearPolicyNoBias(dim_actions=dim_action, dim_states=dim_state)
+            self.policy = LinearPolicyNoBias(
+                dim_actions=dim_action,
+                dim_states=dim_state,
+                matrix_init_mode=self.matrix_init_mode,
+                near_zero_init_scale=self.near_zero_init_scale,
+                near_zero_init_min_abs=self.near_zero_init_min_abs,
+                near_zero_init_decimals=self.near_zero_init_decimals,
+            )
         else:
-            self.policy = LinearPolicy(dim_actions=dim_action, dim_states=dim_state)
+            self.policy = LinearPolicy(
+                dim_actions=dim_action,
+                dim_states=dim_state,
+                matrix_init_mode=self.matrix_init_mode,
+                near_zero_init_scale=self.near_zero_init_scale,
+                near_zero_init_min_abs=self.near_zero_init_min_abs,
+                near_zero_init_decimals=self.near_zero_init_decimals,
+            )
         self.replay_buffer = EpisodeRewardBufferNoBias(max_size=max_traj_count)
         self.llm_brain = LLMBrain(
             llm_si_template, llm_output_conversion_template, llm_model_name

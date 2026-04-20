@@ -31,6 +31,10 @@ def run_training_loop(
     search_step_size=0.1,
     env_kwargs=None,
     env_desc_file=None,
+    matrix_init_mode="near_zero",
+    near_zero_init_scale=0.15,
+    near_zero_init_min_abs=0.02,
+    near_zero_init_decimals=2,
     seed=None,
 ):
     assert task in ["dist_state_llm_num_optim_semantics", "cont_state_llm_num_optim_semantics"]
@@ -84,6 +88,10 @@ def run_training_loop(
             optimum,
             search_step_size,
             env_desc_file=env_desc_file,
+            matrix_init_mode=matrix_init_mode,
+            near_zero_init_scale=near_zero_init_scale,
+            near_zero_init_min_abs=near_zero_init_min_abs,
+            near_zero_init_decimals=near_zero_init_decimals,
             seed=seed,
         )
 

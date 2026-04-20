@@ -4,6 +4,7 @@ from agent.policy.base_policy import Policy
 
 class LinearPolicy(Policy):
     VALID_DECOMPOSITIONS = ("lu", "qr", "svd")
+    VALID_MATRIX_INIT_MODES = ("near_zero", "random", "zero")
 
     def __init__(
         self,
@@ -12,6 +13,10 @@ class LinearPolicy(Policy):
         use_factorized_policy=False,
         factor_rank=None,
         decomposition_type="lu",
+        matrix_init_mode="near_zero",
+        near_zero_init_scale=0.15,
+        near_zero_init_min_abs=0.02,
+        near_zero_init_decimals=2,
     ):
         super().__init__(dim_states, dim_actions)
 
@@ -44,26 +49,85 @@ class LinearPolicy(Policy):
         else:
             self.factor_rank = None
 
-        self.weight = self._sample_near_zero_nonzero((self.dim_states, self.dim_actions))
-        self.bias = self._sample_near_zero_nonzero((1, self.dim_actions))
+        self.matrix_init_mode = self._normalize_init_mode(matrix_init_mode)
+        self.near_zero_init_scale = float(near_zero_init_scale)
+        self.near_zero_init_min_abs = float(near_zero_init_min_abs)
+        self.near_zero_init_decimals = int(near_zero_init_decimals)
+
+        if self.near_zero_init_scale <= 0:
+            raise ValueError(f"near_zero_init_scale must be > 0, got: {self.near_zero_init_scale}")
+        if self.near_zero_init_min_abs <= 0:
+            raise ValueError(f"near_zero_init_min_abs must be > 0, got: {self.near_zero_init_min_abs}")
+        if self.near_zero_init_decimals < 0:
+            raise ValueError(
+                f"near_zero_init_decimals must be >= 0, got: {self.near_zero_init_decimals}"
+            )
 
         # Factor components (decomposition-specific)
         self.factor_names = self._factor_names_for_decomposition(self.decomposition_type) if self.use_factorized_policy else []
         self.factors = {}
         self._sync_named_factor_attrs()
 
-    def _sample_near_zero_nonzero(self, shape, scale=0.15, min_abs=0.02, decimals=2):
+        self.initialize_policy()
+
+    def _normalize_init_mode(self, matrix_init_mode):
+        mode = str(matrix_init_mode).strip().lower()
+        if mode == "zero":
+            return "near_zero"
+        if mode not in {"near_zero", "random"}:
+            raise ValueError(
+                "matrix_init_mode must be 'near_zero', 'random', or 'zero' (alias), "
+                f"got: {matrix_init_mode!r}"
+            )
+        return mode
+
+    def _enforce_nonzero_values(self, values, source_values=None):
+        adjusted = np.array(values, copy=True)
+        zero_mask = adjusted == 0.0
+        if not np.any(zero_mask):
+            return adjusted
+
+        min_abs = self.near_zero_init_min_abs
+        reference = adjusted if source_values is None else np.asarray(source_values)
+        reference_sign = np.where(reference >= 0.0, 1.0, -1.0)
+        replacement = reference_sign[zero_mask] * min_abs
+
+        remaining_zero_mask = replacement == 0.0
+        if np.any(remaining_zero_mask):
+            replacement[remaining_zero_mask] = np.random.choice(
+                [-min_abs, min_abs],
+                size=int(np.sum(remaining_zero_mask)),
+            )
+
+        adjusted[zero_mask] = replacement
+        return adjusted
+
+    def _sample_near_zero_nonzero(self, shape):
+        scale = self.near_zero_init_scale
+        min_abs = self.near_zero_init_min_abs
+        decimals = self.near_zero_init_decimals
+
         values = np.random.uniform(-scale, scale, size=shape)
         signs = np.where(values >= 0.0, 1.0, -1.0)
         values = np.where(np.abs(values) < min_abs, signs * min_abs, values)
         values = np.round(values, decimals)
 
-        zero_mask = values == 0.0
-        if np.any(zero_mask):
-            replacement = np.random.choice([-min_abs, min_abs], size=int(np.sum(zero_mask)))
-            values[zero_mask] = replacement
+        return self._enforce_nonzero_values(values)
 
-        return values
+    def _sample_random_values(self, shape, std=1.0, decimals=2):
+        raw = np.random.normal(0.0, std, size=shape)
+        rounded = np.round(raw, decimals)
+        return self._enforce_nonzero_values(rounded, source_values=raw)
+
+    def _sample_weight_bias_values(self, shape):
+        if self.matrix_init_mode == "near_zero":
+            return self._sample_near_zero_nonzero(shape)
+        return self._sample_random_values(shape, std=3.0, decimals=1)
+
+    def _sample_factor_values(self, shape):
+        if self.matrix_init_mode == "near_zero":
+            return self._sample_near_zero_nonzero(shape)
+        return self._sample_random_values(shape, std=1.0, decimals=2)
 
     def _factor_names_for_decomposition(self, decomposition_type):
         if decomposition_type == "lu":
@@ -119,11 +183,19 @@ class LinearPolicy(Policy):
                 "r": "R",
             },
             "svd": {
+                "a": "U",
+                "rawa": "U",
+                "rawu": "U",
+                "left": "U",
                 "u": "U",
                 "s": "S",
                 "sigma": "S",
                 "singularvalues": "S",
                 "singularvalue": "S",
+                "b": "Vt",
+                "rawb": "Vt",
+                "rawv": "Vt",
+                "right": "Vt",
                 "vt": "Vt",
                 "vtranspose": "Vt",
                 "vtransposed": "Vt",
@@ -145,30 +217,30 @@ class LinearPolicy(Policy):
 
         if self.decomposition_type == "lu":
             self.factors = {
-                "L": self._sample_near_zero_nonzero((m, k)),
-                "U": self._sample_near_zero_nonzero((k, n)),
+                "L": self._sample_factor_values((m, k)),
+                "U": self._sample_factor_values((k, n)),
             }
         elif self.decomposition_type == "qr":
-            q_raw = self._sample_near_zero_nonzero((m, k))
+            q_raw = self._sample_factor_values((m, k))
             q_factor, _ = np.linalg.qr(q_raw, mode="reduced")
-            r_factor = np.triu(self._sample_near_zero_nonzero((k, n)))
+            r_factor = np.triu(self._sample_factor_values((k, n)))
             self.factors = {
-                "Q": np.round(q_factor, 2),
-                "R": r_factor,
+                "Q": self._enforce_nonzero_values(np.round(q_factor, 2), source_values=q_factor),
+                "R": self._enforce_nonzero_values(r_factor),
             }
         else:
             # SVD factors: A = U @ diag(S) @ Vt
-            u_raw = self._sample_near_zero_nonzero((m, k))
+            u_raw = self._sample_factor_values((m, k))
             u_factor, _ = np.linalg.qr(u_raw, mode="reduced")
 
-            v_raw = self._sample_near_zero_nonzero((n, k))
+            v_raw = self._sample_factor_values((n, k))
             v_factor, _ = np.linalg.qr(v_raw, mode="reduced")
 
-            singular_values = np.sort(np.abs(self._sample_near_zero_nonzero((k,))))[::-1]
+            singular_values = np.sort(np.abs(self._sample_factor_values((k,))))[::-1]
             self.factors = {
-                "U": np.round(u_factor, 2),
-                "S": singular_values,
-                "Vt": np.round(v_factor.T, 2),
+                "U": self._enforce_nonzero_values(np.round(u_factor, 2), source_values=u_factor),
+                "S": self._enforce_nonzero_values(singular_values),
+                "Vt": self._enforce_nonzero_values(np.round(v_factor.T, 2), source_values=v_factor.T),
             }
 
         self._sync_named_factor_attrs()
@@ -211,6 +283,8 @@ class LinearPolicy(Policy):
             normalized["Q"] = q_factor
             normalized["R"] = r_factor
         elif self.decomposition_type == "svd":
+            # Accept raw SVD precursor factors from the LLM and convert them
+            # into valid decomposition factors used by the policy.
             u_factor, _ = np.linalg.qr(normalized["U"], mode="reduced")
             v_factor, _ = np.linalg.qr(normalized["Vt"].T, mode="reduced")
 
@@ -230,13 +304,12 @@ class LinearPolicy(Policy):
         # self.weight = np.round((np.random.rand(self.dim_states, self.dim_actions)) * 1, 1)
         # self.bias = np.round((np.random.rand(1, self.dim_actions) - 0.) * 1, 1)
 
-        self.weight = self._sample_near_zero_nonzero((self.dim_states, self.dim_actions))
-        self.bias = self._sample_near_zero_nonzero((1, self.dim_actions))
+        self.weight = self._sample_weight_bias_values((self.dim_states, self.dim_actions))
+        self.bias = self._sample_weight_bias_values((1, self.dim_actions))
 
         # self.weight = np.round(np.random.uniform(-3., 3., size=(self.dim_states, self.dim_actions)), 1)
         # self.bias = np.round(np.random.uniform(-3., 3., size=(1, self.dim_actions)), 1)
-        
-        # If using factorized policy, initialize decomposition factors and reconstruct.
+
         if self.use_factorized_policy:
             self._initialize_factor_components()
             self.reconstruct_weight_from_factors()

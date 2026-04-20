@@ -48,6 +48,21 @@ class LLMNumOptimAgent:
         enable_alternating_lu_schedule: bool = False,
         lu_schedule_l_episodes: int = 5,
         lu_schedule_u_iterations: int = 3,
+        matrix_init_mode: str = "near_zero",
+        near_zero_init_scale: float = 0.15,
+        near_zero_init_min_abs: float = 0.02,
+        near_zero_init_decimals: int = 2,
+        enable_force_new_matrix_exploration: bool = True,
+        force_new_matrix_reward_threshold: float = -100.0,
+        force_exploration_min_index_delta: float = 0.35,
+        force_exploration_reference_count: int = 5,
+        force_exploration_max_llm_attempts: int = 3,
+        enable_limit_matrix_delta: bool = False,
+        matrix_delta_limit: float = 0.2,
+        enable_reward_dip_reset_to_best: bool = False,
+        reward_dip_reset_threshold: float = -200.0,
+        enable_matrix_quality_soft_penalty_signal: bool = False,
+        enable_matrix_structural_validation: bool = False,
         seed: int = None,
     ):
         self.start_time = time.process_time()
@@ -60,6 +75,7 @@ class LLMNumOptimAgent:
         self.optimum = optimum
         self.search_step_size = search_step_size
         self.use_factorized_policy = use_factorized_policy
+        self.matrix_init_mode = str(matrix_init_mode).strip().lower()
         self.decomposition_type = str(decomposition_type or "lu").lower()
         self.allowed_factor_names = {
             "lu": ("L", "U"),
@@ -79,6 +95,45 @@ class LLMNumOptimAgent:
                 f"Allowed: {self.allowed_factor_names[self.decomposition_type]} or None"
             )
 
+        self.near_zero_init_scale = float(near_zero_init_scale)
+        self.near_zero_init_min_abs = float(near_zero_init_min_abs)
+        self.near_zero_init_decimals = int(near_zero_init_decimals)
+        if self.near_zero_init_scale <= 0:
+            raise ValueError(f"near_zero_init_scale must be > 0, got: {self.near_zero_init_scale}")
+        if self.near_zero_init_min_abs <= 0:
+            raise ValueError(f"near_zero_init_min_abs must be > 0, got: {self.near_zero_init_min_abs}")
+        if self.near_zero_init_decimals < 0:
+            raise ValueError(f"near_zero_init_decimals must be >= 0, got: {self.near_zero_init_decimals}")
+
+        self.enable_force_new_matrix_exploration = bool(enable_force_new_matrix_exploration)
+        self.force_new_matrix_reward_threshold = float(force_new_matrix_reward_threshold)
+        self.force_exploration_min_index_delta = float(force_exploration_min_index_delta)
+        self.force_exploration_reference_count = int(force_exploration_reference_count)
+        self.force_exploration_max_llm_attempts = int(force_exploration_max_llm_attempts)
+        self.svd_sigma_reset_threshold = -100.0
+        self.svd_uv_reset_threshold = -1000.0
+        if self.force_exploration_reference_count <= 0:
+            raise ValueError(
+                f"force_exploration_reference_count must be > 0, got: {self.force_exploration_reference_count}"
+            )
+        if self.force_exploration_max_llm_attempts <= 0:
+            raise ValueError(
+                f"force_exploration_max_llm_attempts must be > 0, got: {self.force_exploration_max_llm_attempts}"
+            )
+
+        self.enable_limit_matrix_delta = bool(enable_limit_matrix_delta)
+        self.matrix_delta_limit = float(matrix_delta_limit)
+        if self.matrix_delta_limit <= 0:
+            raise ValueError(f"matrix_delta_limit must be > 0, got: {self.matrix_delta_limit}")
+
+        self.enable_reward_dip_reset_to_best = bool(enable_reward_dip_reset_to_best)
+        self.reward_dip_reset_threshold = float(reward_dip_reset_threshold)
+
+        self.enable_matrix_quality_soft_penalty_signal = bool(
+            enable_matrix_quality_soft_penalty_signal
+        )
+        self.enable_matrix_structural_validation = bool(enable_matrix_structural_validation)
+
         self.enable_alternating_lu_schedule = bool(enable_alternating_lu_schedule)
         self.lu_schedule_l_episodes = int(lu_schedule_l_episodes)
         self.lu_schedule_u_iterations = int(lu_schedule_u_iterations)
@@ -91,12 +146,6 @@ class LLMNumOptimAgent:
                 raise ValueError("lu_schedule_l_episodes and lu_schedule_u_iterations must both be positive integers")
         # Deterministic seed for episode rollouts. If None, default to 42.
         self.seed = seed if seed is not None else 42
-        self.force_new_matrix_reward_threshold = -100.0
-        # Forced exploration strictness: each editable index must move by at least
-        # this absolute amount relative to recent attempts.
-        self.force_exploration_min_index_delta = 0.35
-        self.force_exploration_reference_count = 5
-        self.force_exploration_max_llm_attempts = 3
 
         if not self.bias:
             param_count = dim_action * dim_state
@@ -109,7 +158,19 @@ class LLMNumOptimAgent:
             "[DEBUG] "
             f"use_factorized_policy={use_factorized_policy}, "
             f"factor_rank={factor_rank}, dim_state={dim_state}, dim_action={dim_action}, "
-            f"decomposition_type={self.decomposition_type}, frozen_factor={self.frozen_factor}"
+            f"decomposition_type={self.decomposition_type}, frozen_factor={self.frozen_factor}, "
+            f"matrix_init_mode={self.matrix_init_mode}, "
+            f"enable_limit_matrix_delta={self.enable_limit_matrix_delta}, "
+            f"matrix_delta_limit={self.matrix_delta_limit}, "
+            f"svd_sigma_reset_threshold={self.svd_sigma_reset_threshold}, "
+            f"svd_uv_reset_threshold={self.svd_uv_reset_threshold}, "
+            "enable_reward_dip_reset_to_best="
+            f"{self.enable_reward_dip_reset_to_best}, "
+            f"reward_dip_reset_threshold={self.reward_dip_reset_threshold}, "
+            "enable_matrix_quality_soft_penalty_signal="
+            f"{self.enable_matrix_quality_soft_penalty_signal}, "
+            "enable_matrix_structural_validation="
+            f"{self.enable_matrix_structural_validation}"
         )
         if use_factorized_policy:
             if factor_rank is None:
@@ -122,7 +183,12 @@ class LLMNumOptimAgent:
 
         if not self.bias:
             self.policy = LinearPolicyNoBias(
-                dim_actions=dim_action, dim_states=dim_state
+                dim_actions=dim_action,
+                dim_states=dim_state,
+                matrix_init_mode=self.matrix_init_mode,
+                near_zero_init_scale=self.near_zero_init_scale,
+                near_zero_init_min_abs=self.near_zero_init_min_abs,
+                near_zero_init_decimals=self.near_zero_init_decimals,
             )
         else:
             self.policy = LinearPolicy(
@@ -131,6 +197,10 @@ class LLMNumOptimAgent:
                 use_factorized_policy=use_factorized_policy,
                 factor_rank=self.factor_rank,
                 decomposition_type=self.decomposition_type,
+                matrix_init_mode=self.matrix_init_mode,
+                near_zero_init_scale=self.near_zero_init_scale,
+                near_zero_init_min_abs=self.near_zero_init_min_abs,
+                near_zero_init_decimals=self.near_zero_init_decimals,
             )
         self.replay_buffer = EpisodeRewardBufferNoBias(max_size=max_traj_count)
         self.llm_brain = LLMBrain(
@@ -157,6 +227,11 @@ class LLMNumOptimAgent:
         # Quality shaping metadata from the most recently parsed factor proposal.
         self._current_matrix_structure_penalty = 0.0
         self._current_matrix_quality_notes = []
+        self._last_matrix_quality_notes = []
+        self._last_matrix_delta_signal = None
+        self._last_invalid_matrix_reason = None
+        self._best_payload = None
+        self._best_payload_reward = float('-inf')
 
         if self.bias:
             self.dim_state += 1
@@ -259,9 +334,210 @@ class LLMNumOptimAgent:
         except Exception:
             return None
 
+    def _is_svd_factorized_policy(self):
+        return bool(self.use_factorized_policy and self.decomposition_type == "svd")
+
     def _should_force_new_matrix_exploration(self):
+        if self._is_svd_factorized_policy():
+            return False
+        if not self.enable_force_new_matrix_exploration:
+            return False
         latest_reward = self._latest_recorded_reward()
-        return latest_reward is not None and latest_reward < self.force_new_matrix_reward_threshold
+        return latest_reward is not None and latest_reward <= self.force_new_matrix_reward_threshold
+
+    def _sample_near_zero_factor_values(self, shape):
+        if hasattr(self.policy, "_sample_near_zero_nonzero"):
+            return np.array(self.policy._sample_near_zero_nonzero(shape), copy=True)
+
+        raw = np.random.uniform(-self.near_zero_init_scale, self.near_zero_init_scale, size=shape)
+        return np.round(raw, self.near_zero_init_decimals)
+
+    def _reset_policy_to_near_zero_baseline(self, effective_frozen_factor=None):
+        if self.use_factorized_policy:
+            factor_shapes = self._factor_shapes()
+            current_components = self.policy.get_parameters(return_factors=True)
+            reset_components = {}
+
+            for factor_name in self._factor_names():
+                if factor_name == effective_frozen_factor:
+                    reset_components[factor_name] = np.array(current_components[factor_name], copy=True)
+                    continue
+                reset_components[factor_name] = self._sample_near_zero_factor_values(factor_shapes[factor_name])
+
+            if hasattr(self.policy, "bias") and self.policy.bias is not None:
+                reset_components["bias"] = np.array(self.policy.bias, copy=True)
+
+            self.policy.update_policy(factor_components=reset_components)
+            return
+
+        if hasattr(self.policy, "_sample_near_zero_nonzero"):
+            weight = self.policy._sample_near_zero_nonzero((self.policy.dim_states, self.policy.dim_actions))
+            if hasattr(self.policy, "bias") and self.policy.bias is not None:
+                bias = self.policy._sample_near_zero_nonzero((1, self.policy.dim_actions))
+                merged = np.concatenate((weight, bias), axis=0)
+                self.policy.update_policy(merged)
+            else:
+                self.policy.update_policy(weight)
+
+    def _maybe_reset_svd_factors_on_low_reward(self):
+        context = {
+            "svd_reset_active": False,
+            "svd_reset_latest_reward": None,
+            "svd_reset_sigma": False,
+            "svd_reset_uv": False,
+            "svd_sigma_reset_threshold": self.svd_sigma_reset_threshold,
+            "svd_uv_reset_threshold": self.svd_uv_reset_threshold,
+        }
+        if not self._is_svd_factorized_policy():
+            return context
+
+        latest_reward = self._latest_recorded_reward()
+        if latest_reward is None:
+            return context
+
+        latest_reward = float(latest_reward)
+        context["svd_reset_latest_reward"] = latest_reward
+
+        reset_sigma = latest_reward <= self.svd_sigma_reset_threshold
+        reset_uv = latest_reward <= self.svd_uv_reset_threshold
+        if not reset_sigma and not reset_uv:
+            return context
+
+        current_components = self.policy.get_parameters(return_factors=True)
+        next_components = {
+            "U": np.array(current_components["U"], copy=True),
+            "S": np.array(current_components["S"], copy=True),
+            "Vt": np.array(current_components["Vt"], copy=True),
+            "bias": np.array(self.policy.bias, copy=True),
+        }
+        factor_shapes = self._factor_shapes()
+
+        if reset_uv:
+            next_components["U"] = self._sample_near_zero_factor_values(factor_shapes["U"])
+            next_components["Vt"] = self._sample_near_zero_factor_values(factor_shapes["Vt"])
+
+        if reset_sigma:
+            next_components["S"] = self._sample_near_zero_factor_values(factor_shapes["S"])
+
+        self.policy.update_policy(factor_components=next_components)
+
+        context["svd_reset_active"] = True
+        context["svd_reset_sigma"] = bool(reset_sigma)
+        context["svd_reset_uv"] = bool(reset_uv)
+
+        reset_targets = []
+        if reset_sigma:
+            reset_targets.append("S")
+        if reset_uv:
+            reset_targets.append("U and Vt")
+
+        print(
+            "[SVD Reset] "
+            f"latest reward={latest_reward:.2f}. "
+            f"Reset near-zero baseline for {', '.join(reset_targets)}. "
+            "The next LLM call is explicitly signaled about this reset."
+        )
+        return context
+
+    def _clone_policy_payload(self, payload):
+        if isinstance(payload, dict):
+            cloned = {}
+            for key, value in payload.items():
+                cloned[key] = np.array(value, copy=True)
+            return cloned
+        return np.array(payload, copy=True)
+
+    def _capture_current_policy_payload(self):
+        if self.use_factorized_policy:
+            current_components = self.policy.get_parameters(return_factors=True)
+            payload = {
+                factor_name: np.array(current_components[factor_name], copy=True)
+                for factor_name in self._factor_names()
+                if factor_name in current_components
+            }
+            if hasattr(self.policy, "bias") and self.policy.bias is not None:
+                payload["bias"] = np.array(self.policy.bias, copy=True)
+            return payload
+        return np.array(self.policy.get_parameters(), copy=True)
+
+    def _apply_policy_payload(self, payload):
+        if payload is None:
+            return
+
+        if isinstance(payload, dict):
+            self.policy.update_policy(factor_components=self._clone_policy_payload(payload))
+            return
+
+        self.policy.update_policy(np.array(payload, copy=True))
+
+    def _get_best_payload_from_replay(self):
+        best_payload = None
+        best_reward = float('-inf')
+        for entry in self.replay_buffer.buffer:
+            if not isinstance(entry, (tuple, list)) or len(entry) < 2:
+                continue
+            payload, reward = entry[0], entry[1]
+            try:
+                reward_value = float(reward)
+            except Exception:
+                continue
+            if reward_value > best_reward:
+                best_reward = reward_value
+                best_payload = self._clone_policy_payload(payload)
+
+        return best_payload, best_reward
+
+    def _record_best_payload(self, payload, reward):
+        try:
+            reward_value = float(reward)
+        except Exception:
+            return
+
+        if payload is None:
+            return
+
+        if reward_value > self._best_payload_reward:
+            self._best_payload_reward = reward_value
+            self._best_payload = self._clone_policy_payload(payload)
+
+    def _maybe_reset_policy_to_best_on_reward_dip(self):
+        context = {
+            "reward_dip_reset_to_best_active": False,
+            "reward_dip_reset_threshold": self.reward_dip_reset_threshold,
+            "reward_dip_latest_reward": None,
+            "reward_dip_best_reward": None,
+        }
+        if not self.enable_reward_dip_reset_to_best:
+            return context
+
+        latest_reward = self._latest_recorded_reward()
+        if latest_reward is None:
+            return context
+
+        context["reward_dip_latest_reward"] = latest_reward
+        if latest_reward > self.reward_dip_reset_threshold:
+            return context
+
+        best_payload = self._best_payload
+        best_reward = self._best_payload_reward
+        if best_payload is None:
+            best_payload, best_reward = self._get_best_payload_from_replay()
+            if best_payload is not None:
+                self._best_payload = self._clone_policy_payload(best_payload)
+                self._best_payload_reward = float(best_reward)
+
+        if best_payload is None:
+            return context
+
+        self._apply_policy_payload(best_payload)
+        context["reward_dip_reset_to_best_active"] = True
+        context["reward_dip_best_reward"] = float(best_reward)
+        print(
+            "[Reward Dip Reset] "
+            f"latest reward={latest_reward:.2f} <= {self.reward_dip_reset_threshold:.2f}. "
+            f"Resetting policy to best-so-far reward={float(best_reward):.2f} and building from there."
+        )
+        return context
 
     def _flatten_editable_values(self, payload, effective_frozen_factor=None):
         if isinstance(payload, dict):
@@ -282,6 +558,102 @@ class LLMNumOptimAgent:
         if self.bias and vector.size >= self.dim_action:
             vector = vector[:-self.dim_action]
         return vector
+
+    def _proposal_exact_match_current(
+        self,
+        candidate_components,
+        current_components,
+        effective_frozen_factor=None,
+        candidate_bias=None,
+        current_bias=None,
+    ):
+        """Return True when all editable factors (and optional bias) are exactly unchanged."""
+        if not isinstance(candidate_components, dict) or not isinstance(current_components, dict):
+            return False
+
+        for factor_name in self._factor_names():
+            if factor_name == effective_frozen_factor:
+                continue
+
+            if factor_name not in candidate_components or factor_name not in current_components:
+                return False
+
+            candidate_values = np.asarray(candidate_components[factor_name], dtype=float)
+            current_values = np.asarray(current_components[factor_name], dtype=float)
+            if candidate_values.shape != current_values.shape:
+                return False
+            if not np.array_equal(candidate_values, current_values):
+                return False
+
+        if candidate_bias is not None and current_bias is not None:
+            cand_bias = np.asarray(candidate_bias, dtype=float)
+            curr_bias = np.asarray(current_bias, dtype=float)
+            if cand_bias.shape != curr_bias.shape:
+                return False
+            if not np.array_equal(cand_bias, curr_bias):
+                return False
+
+        return True
+
+    def _apply_matrix_delta_limit(self, candidate_payload, effective_frozen_factor=None):
+        max_delta = float(self.matrix_delta_limit)
+
+        if isinstance(candidate_payload, dict):
+            if not self.use_factorized_policy:
+                return candidate_payload, None
+
+            current_components = self.policy.get_parameters(return_factors=True)
+            entries_exceeding_limit = 0
+            max_abs_delta = 0.0
+
+            for factor_name in self._factor_names():
+                if factor_name not in candidate_payload:
+                    continue
+
+                candidate_values = np.asarray(candidate_payload[factor_name], dtype=float)
+                current_values = np.asarray(current_components[factor_name], dtype=float)
+
+                # Frozen factors should not be altered in this step.
+                if factor_name == effective_frozen_factor:
+                    continue
+
+                if candidate_values.shape != current_values.shape:
+                    continue
+
+                delta = candidate_values - current_values
+                abs_delta = np.abs(delta)
+                entries_exceeding_limit += int(np.count_nonzero(abs_delta > max_delta))
+                if abs_delta.size > 0:
+                    max_abs_delta = max(max_abs_delta, float(np.max(abs_delta)))
+
+            return candidate_payload, {
+                "enabled": True,
+                "limit": max_delta,
+                "entries_exceeding_limit": int(entries_exceeding_limit),
+                "max_abs_delta": float(max_abs_delta),
+                "has_large_changes": bool(entries_exceeding_limit > 0),
+            }
+
+        candidate_vector = np.asarray(candidate_payload, dtype=float).reshape(-1)
+        current_vector = np.asarray(self.policy.get_parameters(), dtype=float).reshape(-1)
+        if candidate_vector.size != current_vector.size:
+            return candidate_payload, None
+
+        matrix_size = current_vector.size
+        if self.bias and matrix_size >= self.dim_action:
+            matrix_size -= self.dim_action
+
+        matrix_delta = candidate_vector[:matrix_size] - current_vector[:matrix_size]
+        abs_delta = np.abs(matrix_delta)
+        entries_exceeding_limit = int(np.count_nonzero(abs_delta > max_delta))
+        max_abs_delta = float(np.max(abs_delta)) if abs_delta.size > 0 else 0.0
+        return candidate_payload, {
+            "enabled": True,
+            "limit": max_delta,
+            "entries_exceeding_limit": int(entries_exceeding_limit),
+            "max_abs_delta": float(max_abs_delta),
+            "has_large_changes": bool(entries_exceeding_limit > 0),
+        }
 
     def _validate_forced_exploration_candidate(self, candidate_payload, effective_frozen_factor=None):
         candidate_vector = self._flatten_editable_values(candidate_payload, effective_frozen_factor)
@@ -400,7 +772,11 @@ class LLMNumOptimAgent:
 
                 vec_scale = max(1.0, float(np.max(np.abs(vec))))
                 vec_relative_std = float(np.std(vec) / vec_scale)
-                if vec.size >= 3 and vec_relative_std < 0.08:
+                if (
+                    self.enable_matrix_quality_soft_penalty_signal
+                    and vec.size >= 3
+                    and vec_relative_std < 0.08
+                ):
                     penalty_score += float((0.08 - vec_relative_std) * 2.0)
                     soft_notes.append(
                         f"{matrix_name} {axis_name} {idx} is close to flat "
@@ -414,17 +790,20 @@ class LLMNumOptimAgent:
                     mean_abs_diff = float(np.mean(np.abs(vec_i - vec_j)))
                     cosine = self._cosine_similarity(vec_i, vec_j)
 
-                    if np.allclose(vec_i, vec_j, atol=0.08, rtol=0.0):
+                    if np.allclose(vec_i, vec_j, atol=1e-12, rtol=0.0):
                         hard_issues.append(
-                            f"{matrix_name} {axis_name}s {i} and {j} are repeated or near-repeated."
+                            f"{matrix_name} {axis_name}s {i} and {j} are exactly repeated."
                         )
                     elif cosine >= 0.995 and mean_abs_diff <= 0.20:
-                        hard_issues.append(
-                            f"{matrix_name} {axis_name}s {i} and {j} are too similar "
+                        soft_notes.append(
+                            f"{matrix_name} {axis_name}s {i} and {j} are very similar "
                             f"(cos {cosine:.3f}, mean abs diff {mean_abs_diff:.3f})."
                         )
-                    elif cosine >= 0.96 and mean_abs_diff <= 0.35:
-                        penalty_score += float((cosine - 0.96) * 4.0)
+                    elif (
+                        self.enable_matrix_quality_soft_penalty_signal
+                        and cosine >= 0.96
+                        and mean_abs_diff <= 0.35
+                    ):
                         soft_notes.append(
                             f"{matrix_name} {axis_name}s {i} and {j} show repeating structure "
                             f"(cos {cosine:.3f})."
@@ -444,7 +823,7 @@ class LLMNumOptimAgent:
 
             unique_patterns = len(set(row_sign_patterns))
             pattern_diversity = unique_patterns / float(len(row_sign_patterns))
-            if pattern_diversity < 0.50:
+            if self.enable_matrix_quality_soft_penalty_signal and pattern_diversity < 0.50:
                 penalty_score += float((0.50 - pattern_diversity) * 4.0)
                 soft_notes.append(
                     f"{matrix_name} row sign patterns lack diversity "
@@ -453,7 +832,7 @@ class LLMNumOptimAgent:
 
         global_scale = max(1.0, float(np.max(np.abs(matrix))))
         global_relative_std = float(np.std(matrix) / global_scale)
-        if global_relative_std < 0.12:
+        if self.enable_matrix_quality_soft_penalty_signal and global_relative_std < 0.12:
             penalty_score += float((0.12 - global_relative_std) * 6.0)
             soft_notes.append(
                 f"{matrix_name} has low global variance (relative std {global_relative_std:.3f})."
@@ -462,7 +841,7 @@ class LLMNumOptimAgent:
         if matrix.shape[0] >= 2:
             row_relative_std = np.std(matrix, axis=1) / global_scale
             flat_row_ratio = float(np.mean(row_relative_std < 0.08))
-            if flat_row_ratio >= 0.50:
+            if self.enable_matrix_quality_soft_penalty_signal and flat_row_ratio >= 0.50:
                 penalty_score += float((flat_row_ratio - 0.50) * 5.0)
                 soft_notes.append(
                     f"{matrix_name} has many flat rows ({flat_row_ratio:.0%})."
@@ -471,7 +850,7 @@ class LLMNumOptimAgent:
         if matrix.shape[1] >= 2:
             col_relative_std = np.std(matrix, axis=0) / global_scale
             flat_col_ratio = float(np.mean(col_relative_std < 0.08))
-            if flat_col_ratio >= 0.50:
+            if self.enable_matrix_quality_soft_penalty_signal and flat_col_ratio >= 0.50:
                 penalty_score += float((flat_col_ratio - 0.50) * 5.0)
                 soft_notes.append(
                     f"{matrix_name} has many flat columns ({flat_col_ratio:.0%})."
@@ -481,7 +860,7 @@ class LLMNumOptimAgent:
             denom = float(np.mean(np.abs(matrix))) + 1e-8
             asymmetry = float(np.mean(np.abs(matrix - matrix.T)) / denom)
             symmetry_score = max(0.0, 1.0 - asymmetry)
-            if symmetry_score >= 0.92:
+            if self.enable_matrix_quality_soft_penalty_signal and symmetry_score >= 0.92:
                 penalty_score += float((symmetry_score - 0.92) * 6.0)
                 soft_notes.append(
                     f"{matrix_name} is close to symmetric (score {symmetry_score:.3f})."
@@ -702,12 +1081,21 @@ class LLMNumOptimAgent:
     def train_policy(self, world: BaseWorld, logdir):
 
         effective_frozen_factor = self.frozen_factor
+        reward_dip_reset_context = self._maybe_reset_policy_to_best_on_reward_dip()
+        svd_low_reward_reset_context = self._maybe_reset_svd_factors_on_low_reward()
         force_new_matrix_exploration = self._should_force_new_matrix_exploration()
+        if svd_low_reward_reset_context.get("svd_reset_active", False):
+            force_new_matrix_exploration = False
+        if reward_dip_reset_context.get("reward_dip_reset_to_best_active", False):
+            force_new_matrix_exploration = False
+        self._last_invalid_matrix_reason = None
+        self._current_matrix_structure_penalty = 0.0
+        self._current_matrix_quality_notes = []
         if force_new_matrix_exploration:
             latest_reward = self._latest_recorded_reward()
             print(
                 "[Exploration Reset] "
-                f"latest reward={latest_reward:.2f} < {self.force_new_matrix_reward_threshold:.2f}. "
+                f"latest reward={latest_reward:.2f} <= {self.force_new_matrix_reward_threshold:.2f}. "
                 "Disabling exploitation and requesting a completely new matrix proposal."
             )
 
@@ -730,6 +1118,7 @@ class LLMNumOptimAgent:
             """Parse decomposition factors from LLM output."""
             self._current_matrix_structure_penalty = 0.0
             self._current_matrix_quality_notes = []
+            self._last_invalid_matrix_reason = None
 
             factor_names = self._factor_names()
             factor_shapes = self._factor_shapes()
@@ -742,6 +1131,21 @@ class LLMNumOptimAgent:
             fallback_components["bias"] = np.array(self.policy.bias, copy=True)
 
             lines = input_text.strip().split('\n')
+
+            def mark_invalid(reason_text):
+                self._last_invalid_matrix_reason = str(reason_text)
+
+            def strip_leading_index(values, expected_len):
+                """Drop common row-index prefixes like `0, ...` when one token too many exists."""
+                if len(values) != expected_len + 1:
+                    return values
+                lead_value = values[0]
+                rounded = int(round(lead_value))
+                if abs(lead_value - rounded) > 1e-9:
+                    return values
+                if 0 <= rounded <= max(99, expected_len * 8):
+                    return values[1:]
+                return values
 
             def detect_section(raw_line):
                 """Detect factor/bias section headings with flexible markdown support."""
@@ -777,6 +1181,11 @@ class LLMNumOptimAgent:
 
             parsed_rows = {factor_name: [] for factor_name in factor_names}
             parsed_vectors = {factor_name: [] for factor_name in factor_names}
+            parsed_number_streams = {
+                factor_name: []
+                for factor_name in factor_names
+                if len(factor_shapes[factor_name]) == 2
+            }
             bias_vector = []
             current_section = None
 
@@ -807,13 +1216,22 @@ class LLMNumOptimAgent:
                         if len(expected_shape) == 1:
                             parsed_vectors[current_section].extend(row)
                         else:
+                            expected_rows = expected_shape[0]
                             expected_cols = expected_shape[1]
-                            if len(row) == expected_cols:
-                                parsed_rows[current_section].append(row)
+                            normalized_row = strip_leading_index(row, expected_cols)
+                            if len(normalized_row) == expected_cols:
+                                if len(parsed_rows[current_section]) < expected_rows:
+                                    parsed_rows[current_section].append(normalized_row)
+                                else:
+                                    print(
+                                        f"Warning: Ignoring extra {current_section} row beyond expected "
+                                        f"{expected_rows}: {normalized_row}"
+                                    )
                             else:
+                                parsed_number_streams[current_section].extend(normalized_row)
                                 print(
-                                    f"Warning: Skipping {current_section} row with {len(row)} values "
-                                    f"(expected {expected_cols}): {row}"
+                                    f"Warning: Buffering {current_section} row with {len(normalized_row)} values "
+                                    f"(expected {expected_cols}): {normalized_row}"
                                 )
 
             parsed_components = {}
@@ -825,19 +1243,100 @@ class LLMNumOptimAgent:
                 expected_shape = factor_shapes[factor_name]
 
                 if len(expected_shape) == 1:
-                    factor_value = np.array(parsed_vectors[factor_name], dtype=float)
+                    expected_len = expected_shape[0]
+                    vector_values = strip_leading_index(list(parsed_vectors[factor_name]), expected_len)
+
+                    if len(vector_values) > expected_len:
+                        print(
+                            f"Warning: {factor_name} vector has {len(vector_values)} values; "
+                            f"truncating to {expected_len}."
+                        )
+                        vector_values = vector_values[:expected_len]
+                    elif len(vector_values) < expected_len:
+                        missing_values = expected_len - len(vector_values)
+                        current_vector = np.asarray(current_components[factor_name], dtype=float).reshape(-1)
+                        print(
+                            f"Warning: {factor_name} vector has {len(vector_values)} values; "
+                            f"backfilling {missing_values} from current factor."
+                        )
+                        vector_values.extend(current_vector[len(vector_values):expected_len].tolist())
+
+                    factor_value = np.array(vector_values, dtype=float)
                     if factor_value.shape != expected_shape:
                         print(
                             f"ERROR: {factor_name} vector has shape {factor_value.shape}, "
                             f"expected {expected_shape}"
                         )
+                        mark_invalid(
+                            f"Bad shape for {factor_name}: got {factor_value.shape}, expected {expected_shape}."
+                        )
                         return fallback_components
                     parsed_components[factor_name] = factor_value
                 else:
+                    expected_rows, expected_cols = expected_shape
+                    current_matrix = np.asarray(current_components[factor_name], dtype=float)
+                    matrix_rows = [list(row) for row in parsed_rows[factor_name]]
+                    buffered_values = list(parsed_number_streams[factor_name])
+
+                    if buffered_values and len(matrix_rows) < expected_rows:
+                        remaining_values = (expected_rows - len(matrix_rows)) * expected_cols
+                        recoverable_values = buffered_values[:remaining_values]
+                        recovered_rows = 0
+                        for idx in range(0, len(recoverable_values), expected_cols):
+                            chunk = recoverable_values[idx:idx + expected_cols]
+                            if len(chunk) != expected_cols:
+                                break
+                            matrix_rows.append(chunk)
+                            recovered_rows += 1
+                            if len(matrix_rows) >= expected_rows:
+                                break
+                        if recovered_rows > 0:
+                            print(
+                                f"Warning: Recovered {recovered_rows} {factor_name} rows "
+                                "from buffered numeric fragments."
+                            )
+
+                    if len(matrix_rows) > expected_rows:
+                        print(
+                            f"Warning: {factor_name} matrix has {len(matrix_rows)} rows; "
+                            f"truncating to {expected_rows}."
+                        )
+                        matrix_rows = matrix_rows[:expected_rows]
+
+                    if len(matrix_rows) < expected_rows:
+                        missing_rows = expected_rows - len(matrix_rows)
+                        print(
+                            f"Warning: {factor_name} matrix has {len(matrix_rows)} rows; "
+                            f"backfilling {missing_rows} from current factor."
+                        )
+                        for row_idx in range(len(matrix_rows), expected_rows):
+                            matrix_rows.append(current_matrix[row_idx, :].tolist())
+
+                    repaired_rows = []
+                    for row_idx, row_values in enumerate(matrix_rows):
+                        normalized_row = strip_leading_index(list(row_values), expected_cols)
+                        if len(normalized_row) > expected_cols:
+                            print(
+                                f"Warning: {factor_name} row {row_idx} has {len(normalized_row)} values; "
+                                f"truncating to {expected_cols}."
+                            )
+                            normalized_row = normalized_row[:expected_cols]
+                        elif len(normalized_row) < expected_cols:
+                            missing_cols = expected_cols - len(normalized_row)
+                            print(
+                                f"Warning: {factor_name} row {row_idx} has {len(normalized_row)} values; "
+                                f"backfilling {missing_cols} values from current factor."
+                            )
+                            row_len = len(normalized_row)
+                            normalized_row.extend(current_matrix[row_idx, row_len:expected_cols].tolist())
+
+                        repaired_rows.append(normalized_row)
+
                     try:
-                        factor_value = np.array(parsed_rows[factor_name], dtype=float)
+                        factor_value = np.array(repaired_rows, dtype=float)
                     except ValueError as exc:
                         print(f"ERROR creating factor {factor_name}: {exc}")
+                        mark_invalid(f"Bad shape for {factor_name}: could not build rectangular matrix.")
                         return fallback_components
 
                     if factor_value.shape != expected_shape:
@@ -848,21 +1347,38 @@ class LLMNumOptimAgent:
                                 f"ERROR: {factor_name} matrix has shape {factor_value.shape}, "
                                 f"expected {expected_shape}"
                             )
+                            mark_invalid(
+                                f"Bad shape for {factor_name}: got {factor_value.shape}, expected {expected_shape}."
+                            )
                             return fallback_components
                     parsed_components[factor_name] = factor_value
 
-            bias = np.array(bias_vector).reshape(1, -1) if bias_vector else np.array(self.policy.bias, copy=True)
-            if bias.shape != self.policy.bias.shape:
-                print(
-                    f"ERROR: bias has shape {bias.shape}, expected {self.policy.bias.shape}. "
-                    "Keeping previous factors."
-                )
-                return fallback_components
+            if bias_vector:
+                expected_bias_size = int(np.prod(self.policy.bias.shape))
+                repaired_bias = strip_leading_index(list(bias_vector), expected_bias_size)
+                if len(repaired_bias) > expected_bias_size:
+                    print(
+                        f"Warning: bias vector has {len(repaired_bias)} values; "
+                        f"truncating to {expected_bias_size}."
+                    )
+                    repaired_bias = repaired_bias[:expected_bias_size]
+                elif len(repaired_bias) < expected_bias_size:
+                    missing_bias = expected_bias_size - len(repaired_bias)
+                    current_bias_flat = np.asarray(self.policy.bias, dtype=float).reshape(-1)
+                    print(
+                        f"Warning: bias vector has {len(repaired_bias)} values; "
+                        f"backfilling {missing_bias} values from current bias."
+                    )
+                    repaired_bias.extend(current_bias_flat[len(repaired_bias):expected_bias_size].tolist())
+                bias = np.array(repaired_bias, dtype=float).reshape(self.policy.bias.shape)
+            else:
+                bias = np.array(self.policy.bias, copy=True)
 
             try:
                 normalized_factors = self.policy.normalize_factor_components(parsed_components)
             except ValueError as exc:
                 print(f"ERROR: invalid factor proposal: {exc}")
+                mark_invalid(f"Bad shape/factor format: {exc}")
                 return fallback_components
 
             total_penalty_score = 0.0
@@ -883,28 +1399,46 @@ class LLMNumOptimAgent:
                     # Light regularity penalty for vectors (e.g., S in SVD).
                     scale = max(1.0, float(np.max(np.abs(factor_value))))
                     relative_std = float(np.std(factor_value) / scale) if factor_value.size > 1 else 0.0
-                    if factor_value.size > 1 and relative_std < 0.05:
+                    if (
+                        self.enable_matrix_quality_soft_penalty_signal
+                        and factor_value.size > 1
+                        and relative_std < 0.05
+                    ):
                         total_penalty_score += float((0.05 - relative_std) * 2.0)
                         quality_notes.append(
                             f"{factor_name} vector has low spread (relative std {relative_std:.3f})."
                         )
 
             if structural_issues:
-                print("ERROR: Rejecting matrix proposal due to structural invalidation:")
-                for issue in structural_issues:
-                    print(f" - {issue}")
+                quality_notes.extend(structural_issues)
+
+            if self._proposal_exact_match_current(
+                normalized_factors,
+                current_components,
+                effective_frozen_factor=effective_frozen_factor,
+                candidate_bias=bias,
+                current_bias=self.policy.bias,
+            ):
+                print(
+                    "ERROR: Rejecting factor proposal because all editable factors and bias "
+                    "are exactly unchanged from the current policy."
+                )
+                mark_invalid("Proposal is an exact duplicate of the current full editable matrix and bias.")
                 return fallback_components
 
             self._current_matrix_structure_penalty = float(total_penalty_score)
             self._current_matrix_quality_notes = list(dict.fromkeys(quality_notes))
+
+            if self._current_matrix_quality_notes:
+                print("[Matrix Signal] Potential matrix issues detected:")
+                for note in self._current_matrix_quality_notes:
+                    print(f" - {note}")
 
             if self._current_matrix_structure_penalty > 0:
                 print(
                     "[Matrix Quality] Soft penalty score: "
                     f"{self._current_matrix_structure_penalty:.3f}"
                 )
-                for note in self._current_matrix_quality_notes:
-                    print(f" - {note}")
 
             print("✓ Shapes validated correctly")
             for factor_name in factor_names:
@@ -920,8 +1454,9 @@ class LLMNumOptimAgent:
 
         def str_nd_examples(replay_buffer: EpisodeRewardBufferNoBias, n):
             if force_new_matrix_exploration:
+                threshold_text = f"{self.force_new_matrix_reward_threshold:.2f}"
                 return (
-                    "Exploration reset mode is active because the latest reward dropped below -100.\n"
+                    f"Exploration reset mode is active because the latest reward dropped below {threshold_text}.\n"
                     "Do NOT exploit or reuse prior parameter structures.\n"
                     "Propose a completely new parameter matrix with a distinctly different value layout.\n"
                 )
@@ -948,9 +1483,19 @@ class LLMNumOptimAgent:
             """Format examples showing decomposition factors and rewards."""
             factor_names = self._factor_names()
 
+            def _display_factor_label(name):
+                if self._is_svd_factorized_policy():
+                    if name == "U":
+                        return "A matrix"
+                    if name == "S":
+                        return "s vector"
+                    if name == "Vt":
+                        return "B matrix"
+                return f"{name} factor"
+
             def _format_factor_block(name, value):
                 value = np.asarray(value)
-                block = f"{name} factor:\n"
+                block = f"{_display_factor_label(name)}:\n"
                 if value.ndim == 1:
                     block += ", ".join([f"{x:.2f}" for x in value]) + "\n"
                 else:
@@ -973,10 +1518,37 @@ class LLMNumOptimAgent:
                     )
                     preamble += "\n"
 
+            if svd_low_reward_reset_context.get("svd_reset_active", False):
+                current = self.policy.get_parameters(return_factors=True)
+                latest_reward = svd_low_reward_reset_context.get("svd_reset_latest_reward")
+                try:
+                    latest_reward_text = f"{float(latest_reward):.2f}"
+                except (TypeError, ValueError):
+                    latest_reward_text = "N/A"
+
+                reset_notes = []
+                if svd_low_reward_reset_context.get("svd_reset_sigma", False):
+                    reset_notes.append("S was reset to near-zero")
+                if svd_low_reward_reset_context.get("svd_reset_uv", False):
+                    reset_notes.append("U and Vt were reset to near-zero")
+
+                preamble += (
+                    f"SVD low-reward reset applied before this step (latest reward={latest_reward_text}).\n"
+                    + " ".join(reset_notes)
+                    + "\n"
+                    + "Current baseline factors after reset:\n"
+                )
+                for factor_name in factor_names:
+                    if factor_name == effective_frozen_factor:
+                        continue
+                    preamble += _format_factor_block(factor_name, current[factor_name])
+                preamble += "\n"
+
             if force_new_matrix_exploration:
+                threshold_text = f"{self.force_new_matrix_reward_threshold:.2f}"
                 return (
                     preamble
-                    + "Exploration reset mode is active because the latest reward dropped below -100.\n"
+                    + f"Exploration reset mode is active because the latest reward dropped below {threshold_text}.\n"
                     + "Do NOT exploit or reuse previous factor structures.\n"
                     + "Generate completely new values for all editable factors.\n"
                 )
@@ -1023,6 +1595,7 @@ class LLMNumOptimAgent:
             self.use_factorized_policy
             and self.decomposition_type == "lu"
             and self.enable_alternating_lu_schedule
+            and not force_new_matrix_exploration
         ):
             schedule_period = self.lu_schedule_l_episodes + self.lu_schedule_u_iterations
             schedule_step = self.training_episodes % schedule_period
@@ -1051,6 +1624,17 @@ class LLMNumOptimAgent:
 
             # On phase boundaries, freeze the best matrix from the previous phase.
             self._apply_phase_best_on_switch(schedule_phase)
+        elif (
+            self.use_factorized_policy
+            and self.decomposition_type == "lu"
+            and self.enable_alternating_lu_schedule
+            and force_new_matrix_exploration
+        ):
+            print(
+                "[LU Schedule] Paused while exploration reset is active "
+                f"(latest reward <= {self.force_new_matrix_reward_threshold:.2f}). "
+                "Schedule resumes once reward is above threshold."
+            )
 
         effective_frozen_factor = current_frozen_factor
         reward_delta_context = self._build_reward_delta_context(self.replay_buffer)
@@ -1058,17 +1642,30 @@ class LLMNumOptimAgent:
         reward_delta_context["force_new_matrix_threshold"] = self.force_new_matrix_reward_threshold
         reward_delta_context["force_new_matrix_index_delta"] = self.force_exploration_min_index_delta
         reward_delta_context["force_new_matrix_reference_count"] = self.force_exploration_reference_count
+        reward_delta_context.update(reward_dip_reset_context)
+        reward_delta_context.update(svd_low_reward_reset_context)
+        reward_delta_context["matrix_invalid_reset_active"] = False
+        reward_delta_context["matrix_invalid_reset_reason"] = None
+        reward_delta_context["matrix_warning_signal_active"] = bool(self._last_matrix_quality_notes)
+        reward_delta_context["matrix_warning_signal_notes"] = list(self._last_matrix_quality_notes)
+        if self._last_matrix_delta_signal is not None:
+            reward_delta_context["matrix_delta_soft_signal_enabled"] = bool(
+                self._last_matrix_delta_signal.get("enabled", False)
+            )
+            reward_delta_context["matrix_delta_soft_signal_active"] = bool(
+                self._last_matrix_delta_signal.get("has_large_changes", False)
+            )
+            reward_delta_context["matrix_delta_soft_limit"] = self._last_matrix_delta_signal.get("limit")
+            reward_delta_context["matrix_delta_soft_exceed_count"] = self._last_matrix_delta_signal.get(
+                "entries_exceeding_limit"
+            )
+            reward_delta_context["matrix_delta_soft_max_abs_delta"] = self._last_matrix_delta_signal.get(
+                "max_abs_delta"
+            )
         
         if self.use_factorized_policy:
-            self._current_matrix_structure_penalty = 0.0
-            self._current_matrix_quality_notes = []
-
             # Factorized policy: LLM generates decomposition factors, then weight is reconstructed.
-            llm_attempt_budget = (
-                self.force_exploration_max_llm_attempts
-                if force_new_matrix_exploration
-                else 1
-            )
+            llm_attempt_budget = max(1, int(self.force_exploration_max_llm_attempts))
             new_factor_components = None
             reasoning = None
             last_validation_reason = None
@@ -1093,18 +1690,36 @@ class LLMNumOptimAgent:
                 )
                 self.api_call_time += api_time
 
-                if force_new_matrix_exploration:
-                    is_valid, validation_reason = self._validate_forced_exploration_candidate(
-                        candidate_components,
+                invalid_reason = self._last_invalid_matrix_reason
+                if invalid_reason:
+                    last_validation_reason = invalid_reason
+                    reward_delta_context["matrix_invalid_reset_active"] = True
+                    reward_delta_context["matrix_invalid_reset_reason"] = invalid_reason
+                    print(
+                        "[Matrix Invalid] "
+                        f"Rejected factor proposal attempt {llm_attempt_idx + 1}/{llm_attempt_budget}: {invalid_reason}"
+                    )
+                    self._reset_policy_to_near_zero_baseline(
                         effective_frozen_factor=effective_frozen_factor,
                     )
-                    if not is_valid:
-                        last_validation_reason = validation_reason
-                        print(
-                            "[Exploration Reset] Rejected factor proposal "
-                            f"attempt {llm_attempt_idx + 1}/{llm_attempt_budget}: {validation_reason}"
-                        )
-                        continue
+                    print(
+                        "[Matrix Reset] Reset editable factors to near-zero baseline "
+                        "before requesting another proposal."
+                    )
+                    continue
+
+                candidate_components, delta_signal = self._apply_matrix_delta_limit(
+                    candidate_components,
+                    effective_frozen_factor=effective_frozen_factor,
+                )
+                self._last_matrix_delta_signal = delta_signal
+                if delta_signal is not None and delta_signal.get("has_large_changes", False):
+                    print(
+                        "[Delta Limit Soft Signal] "
+                        f"{delta_signal.get('entries_exceeding_limit', 0)} factor entries exceeded "
+                        f"+/-{self.matrix_delta_limit:.4f}; no clipping applied. "
+                        f"max_abs_delta={delta_signal.get('max_abs_delta', 0.0):.4f}"
+                    )
 
                 new_factor_components = candidate_components
                 reasoning = candidate_reasoning
@@ -1112,7 +1727,7 @@ class LLMNumOptimAgent:
 
             if new_factor_components is None:
                 raise ValueError(
-                    "Forced exploration failed to produce a strictly unique factor proposal. "
+                    "Failed to produce a valid factor proposal after retries. "
                     f"Last rejection: {last_validation_reason}"
                 )
 
@@ -1129,11 +1744,7 @@ class LLMNumOptimAgent:
             new_parameter_list = new_factor_components
         else:
             # Use regular parameter optimization
-            llm_attempt_budget = (
-                self.force_exploration_max_llm_attempts
-                if force_new_matrix_exploration
-                else 1
-            )
+            llm_attempt_budget = max(1, int(self.force_exploration_max_llm_attempts))
             new_parameter_list = None
             reasoning = None
             last_validation_reason = None
@@ -1150,18 +1761,44 @@ class LLMNumOptimAgent:
                 )
                 self.api_call_time += api_time
 
-                if force_new_matrix_exploration:
-                    is_valid, validation_reason = self._validate_forced_exploration_candidate(
-                        candidate_parameters,
-                        effective_frozen_factor=None,
+                invalid_reason = None
+                candidate_vector = np.asarray(candidate_parameters, dtype=float).reshape(-1)
+                current_vector = np.asarray(self.policy.get_parameters(), dtype=float).reshape(-1)
+                if candidate_vector.size != current_vector.size:
+                    invalid_reason = (
+                        f"Bad shape for full parameter matrix: got {candidate_vector.size} values, "
+                        f"expected {current_vector.size}."
                     )
-                    if not is_valid:
-                        last_validation_reason = validation_reason
-                        print(
-                            "[Exploration Reset] Rejected parameter proposal "
-                            f"attempt {llm_attempt_idx + 1}/{llm_attempt_budget}: {validation_reason}"
-                        )
-                        continue
+                elif np.array_equal(candidate_vector, current_vector):
+                    invalid_reason = "Proposal is an exact duplicate of the current full parameter matrix and bias."
+
+                if invalid_reason is not None:
+                    last_validation_reason = invalid_reason
+                    reward_delta_context["matrix_invalid_reset_active"] = True
+                    reward_delta_context["matrix_invalid_reset_reason"] = invalid_reason
+                    print(
+                        "[Matrix Invalid] "
+                        f"Rejected parameter proposal attempt {llm_attempt_idx + 1}/{llm_attempt_budget}: {invalid_reason}"
+                    )
+                    self._reset_policy_to_near_zero_baseline(effective_frozen_factor=None)
+                    print(
+                        "[Matrix Reset] Reset parameters to near-zero baseline "
+                        "before requesting another proposal."
+                    )
+                    continue
+
+                candidate_parameters, delta_signal = self._apply_matrix_delta_limit(
+                    candidate_parameters,
+                    effective_frozen_factor=None,
+                )
+                self._last_matrix_delta_signal = delta_signal
+                if delta_signal is not None and delta_signal.get("has_large_changes", False):
+                    print(
+                        "[Delta Limit Soft Signal] "
+                        f"{delta_signal.get('entries_exceeding_limit', 0)} matrix entries exceeded "
+                        f"+/-{self.matrix_delta_limit:.4f}; no clipping applied. "
+                        f"max_abs_delta={delta_signal.get('max_abs_delta', 0.0):.4f}"
+                    )
 
                 new_parameter_list = candidate_parameters
                 reasoning = candidate_reasoning
@@ -1169,7 +1806,7 @@ class LLMNumOptimAgent:
 
             if new_parameter_list is None:
                 raise ValueError(
-                    "Forced exploration failed to produce a strictly unique parameter proposal. "
+                    "Failed to produce a valid parameter proposal after retries. "
                     f"Last rejection: {last_validation_reason}"
                 )
 
@@ -1205,7 +1842,9 @@ class LLMNumOptimAgent:
         std = np.std(results)
         print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
 
-        if self.use_factorized_policy:
+        self._last_matrix_quality_notes = list(dict.fromkeys(self._current_matrix_quality_notes))
+
+        if self.use_factorized_policy and self.enable_matrix_quality_soft_penalty_signal:
             raw_penalty_score = float(getattr(self, "_current_matrix_structure_penalty", 0.0))
             if raw_penalty_score > 0:
                 print(
@@ -1224,6 +1863,7 @@ class LLMNumOptimAgent:
             self._update_phase_best_components(schedule_phase, result, new_parameter_list)
 
         self.replay_buffer.add(new_parameter_list, result)
+        self._record_best_payload(new_parameter_list, result)
         self._prune_replay_buffer_for_groq()
         
         # Track training rewards only

@@ -22,3 +22,7 @@ factor_rank: 2
 decomposition_type: qr
 # frozen_factor options for QR: null | "Q" | "R"
 frozen_factor: null
+matrix_init_mode: near_zero
+near_zero_init_scale: 0.15
+near_zero_init_min_abs: 0.02
+near_zero_init_decimals: 2

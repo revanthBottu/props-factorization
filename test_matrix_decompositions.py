@@ -77,3 +77,17 @@ def test_svd_constraints_and_reconstruction():
 
     expected = np.round(policy.U @ np.diag(policy.S) @ policy.Vt, 2)
     _assert_reconstruction_close(policy.weight, expected)
+
+
+def test_svd_raw_section_aliases():
+    policy = LinearPolicy(
+        dim_states=4,
+        dim_actions=3,
+        use_factorized_policy=True,
+        factor_rank=2,
+        decomposition_type="svd",
+    )
+
+    assert policy.canonicalize_factor_name("A matrix") == "U"
+    assert policy.canonicalize_factor_name("s vector") == "S"
+    assert policy.canonicalize_factor_name("B matrix") == "Vt"

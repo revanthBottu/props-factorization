@@ -3,47 +3,59 @@ I will give you the function evaluation and the current iteration number at each
 Your goal is to propose parameter values that efficiently lead us to the global maximum within a limited number of iterations (400).
 
 # About the Policy Representation:
-Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} x {{ dim_action }}), you will propose SVD factors whose product forms the policy:
-**params = U @ diag(S) @ Vt**
+Instead of directly optimizing the parameter matrix params ({{ dim_state }} x {{ dim_action }}), you will propose raw SVD precursor factors.
 
-Where:
-**U**: {{ dim_state }} x {{ factor_rank }} matrix ({{ dim_state }} rows, {{ factor_rank }} columns)
-**S**: vector of length {{ factor_rank }} (singular values)
-**Vt**: {{ factor_rank }} x {{ dim_action }} matrix ({{ factor_rank }} rows, {{ dim_action }} columns)
+Internal policy reconstruction is:
+params = U @ diag(sigma) @ Vt
 
-SVD constraints:
-1. **U should have orthonormal columns** (U^T U ~= I).
-2. **Vt should have orthonormal rows** (Vt Vt^T ~= I).
-3. **S should be non-negative and generally ordered from large to small**.
+You should output raw factors A, s, B with these shapes:
+A: {{ dim_state }} x {{ factor_rank }} matrix ({{ dim_state }} rows, {{ factor_rank }} columns)
+s: vector of length {{ factor_rank }}
+B: {{ factor_rank }} x {{ dim_action }} matrix ({{ factor_rank }} rows, {{ dim_action }} columns)
+
+Outside the LLM, your raw factors will be converted into SVD factors:
+- A -> U
+- s -> sigma
+- B -> Vt
+
+Important: You do NOT need to make A or B orthonormal, and s does NOT need non-negative ordering.
 
 {% if frozen_factor == 'U' %}
-**U is FIXED and will NOT change.** Its values are provided in the examples below.
-You will propose **S** and **Vt** (and bias).
+U is FIXED and will NOT change. Its values are provided in the examples below.
+You will propose s and B (and bias).
 {% elif frozen_factor == 'S' %}
-**S is FIXED and will NOT change.** Its values are provided in the examples below.
-You will propose **U** and **Vt** (and bias).
+s/sigma is FIXED and will NOT change. Its values are provided in the examples below.
+You will propose A and B (and bias).
 {% elif frozen_factor == 'Vt' %}
-**Vt is FIXED and will NOT change.** Its values are provided in the examples below.
-You will propose **U** and **S** (and bias).
+Vt is FIXED and will NOT change. Its values are provided in the examples below.
+You will propose A and s (and bias).
 {% else %}
-You will propose **U**, **S**, and **Vt**.
+You will propose A, s, and B.
 {% endif %}
-All factor values should stay within approximately [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places where possible.
+
+Every numeric value you output must stay within [-6, 6] (use 2 decimals when possible).
 
 # Here's how we'll interact:
-1. I will first provide MAX_STEPS (400) along with a few training examples showing f(params) values for previous factor proposals.
+1. I will first provide MAX_STEPS (400) along with training examples showing f(params) values for previous factor proposals.
 2. You will provide your response in the following exact format:
 {% if frozen_factor != 'U' %}
-    * A block starting with "U matrix:" followed by {{ dim_state }} lines, each with {{ factor_rank }} comma-separated values.
+    * A block starting with "A matrix:" followed by {{ dim_state }} lines, each with {{ factor_rank }} comma-separated values.
 {% endif %}
 {% if frozen_factor != 'S' %}
-    * A line starting with "S vector:" followed by {{ factor_rank }} comma-separated values.
+    * A line starting with "s vector:" followed by {{ factor_rank }} comma-separated values.
 {% endif %}
 {% if frozen_factor != 'Vt' %}
-    * A block starting with "Vt matrix:" followed by {{ factor_rank }} lines, each with {{ dim_action }} comma-separated values.
+    * A block starting with "B matrix:" followed by {{ factor_rank }} lines, each with {{ dim_action }} comma-separated values.
 {% endif %}
-    * A final line with a detailed explanation of why you chose those factors.
-3. I will then compute params = U @ diag(S) @ Vt, evaluate f(params), and provide the value along with the current iteration.
+    * A final line with a detailed explanation of why you chose those values.
+
+Strict output formatting rules:
+* Do not use markdown tables, code fences, bullet lists, or numbered row prefixes.
+* Do not include row labels like A[0], row 1, 1), or - before numeric rows.
+* Put every matrix row on exactly one line; never split a row across multiple lines.
+* Use plain comma-separated numeric values only.
+
+3. I will convert A/s/B into U/sigma/Vt, compute params = U @ diag(sigma) @ Vt, evaluate f(params), and provide the value along with the current iteration.
 4. We will repeat steps 2-3 until we reach the maximum number of iterations.
 
 # Recent Reward Signals
@@ -54,28 +66,33 @@ All factor values should stay within approximately [-{{ factor_value_bound }}, {
 - Distance below zero (max(0, -reward)): {% if distance_below_zero is not none %}{{ distance_below_zero }}{% else %}N/A{% endif %}
 
 Use these deltas explicitly:
-- If delta vs previous is negative, the latest direction regressed; change sign layout and structure more aggressively.
-- If delta vs previous is positive, preserve the useful trend while still exploring nearby alternatives.
-- If reward is below zero and change in below-zero gap is positive, the factors are improving toward zero: exploit around this direction.
-- If distance below zero is large, the policy is still deep in the negative region: explore more aggressively.
+- If delta vs previous is negative, the latest direction regressed; change values/sign layout more aggressively.
+- If delta vs previous is positive, preserve the useful trend while exploring nearby alternatives.
+- If reward is below zero, keep exploring values that move reward toward and above zero.
+- If distance below zero is large, explore more aggressively.
 
 # Remember:
-1. **Do not propose previously seen factor sets.**
-2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. Explore while exploiting.
-3. Search both positive and negative values where appropriate. **During exploration, use search step size of {{ step_size }}**.
-4. Do not return sparse updates that only modify a tiny subset of values.
-5. Keep structural diversity and avoid repeated rows/columns and flat patterns.
+1. Do not repeat an identical previously seen factor set.
+2. The global optimum should be around {{ optimum }}. If you are below that, this is still a local optimum.
+3. Search both positive and negative values where appropriate. During exploration, use search step size {{ step_size }}.
+4. Do not return sparse updates that modify only a tiny subset of values.
+5. Keep all values in [-6, 6].
 
-# Important
+# Important Shape Constraints
 {% if frozen_factor != 'U' %}
- **Your U matrix must have EXACTLY {{ dim_state }} rows with {{ factor_rank }} numbers each**
+Your A matrix must have EXACTLY {{ dim_state }} rows with {{ factor_rank }} numbers each.
 {% endif %}
 {% if frozen_factor != 'S' %}
- **Your S vector must have EXACTLY {{ factor_rank }} numbers**
+Your s vector must have EXACTLY {{ factor_rank }} numbers.
 {% endif %}
 {% if frozen_factor != 'Vt' %}
- **Your Vt matrix must have EXACTLY {{ factor_rank }} rows with {{ dim_action }} numbers each**
+Your B matrix must have EXACTLY {{ factor_rank }} rows with {{ dim_action }} numbers each.
 {% endif %}
+
+Formatting reminder:
+1. Only section headers (A matrix:, s vector:, B matrix:) plus numeric rows.
+2. No extra text before matrices.
+3. If uncertain, complete missing values with reasonable numbers rather than returning incomplete rows.
 
 Next, you will see examples of factors and their corresponding f(params) values.
 {{ episode_reward_buffer_string }}

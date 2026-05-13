@@ -21,9 +21,9 @@ class Policy:
         """
         _table = list(f"States\t\tAction")
         for key, val in self.mapping.items():
-            _table.append(f"{key}\t\t{value}")
+            _table.append(f"{key}\t\t{val}")
 
-        return "\n".join(table)
+        return "\n".join(_table)
 
 
     def initlize_policy(self):

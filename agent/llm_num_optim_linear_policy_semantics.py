@@ -7,6 +7,12 @@ from world.base_world import BaseWorld
 import numpy as np
 import re
 import time
+import random
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except Exception:
+    TORCH_AVAILABLE = False
 
 
 class LLMNumOptimSemanticAgent:
@@ -25,6 +31,11 @@ class LLMNumOptimSemanticAgent:
         optimum,
         search_step_size,
         env_desc_file=None,
+        matrix_init_mode: str = "near_zero",
+        near_zero_init_scale: float = 0.15,
+        near_zero_init_min_abs: float = 0.02,
+        near_zero_init_decimals: int = 2,
+        seed: int = None,
     ):
         self.start_time = time.process_time()
         self.api_call_time = 0
@@ -36,6 +47,11 @@ class LLMNumOptimSemanticAgent:
         self.optimum = optimum
         self.search_step_size = search_step_size
         self.env_desc_file = env_desc_file
+        self.matrix_init_mode = str(matrix_init_mode).strip().lower()
+        self.near_zero_init_scale = float(near_zero_init_scale)
+        self.near_zero_init_min_abs = float(near_zero_init_min_abs)
+        self.near_zero_init_decimals = int(near_zero_init_decimals)
+        self.seed = seed if seed is not None else 42
 
         if not self.bias:
             param_count = dim_action * dim_state
@@ -45,10 +61,22 @@ class LLMNumOptimSemanticAgent:
 
         if not self.bias:
             self.policy = LinearPolicyNoBias(
-                dim_actions=dim_action, dim_states=dim_state
+                dim_actions=dim_action,
+                dim_states=dim_state,
+                matrix_init_mode=self.matrix_init_mode,
+                near_zero_init_scale=self.near_zero_init_scale,
+                near_zero_init_min_abs=self.near_zero_init_min_abs,
+                near_zero_init_decimals=self.near_zero_init_decimals,
             )
         else:
-            self.policy = LinearPolicy(dim_actions=dim_action, dim_states=dim_state)
+            self.policy = LinearPolicy(
+                dim_actions=dim_action,
+                dim_states=dim_state,
+                matrix_init_mode=self.matrix_init_mode,
+                near_zero_init_scale=self.near_zero_init_scale,
+                near_zero_init_min_abs=self.near_zero_init_min_abs,
+                near_zero_init_decimals=self.near_zero_init_decimals,
+            )
         self.replay_buffer = EpisodeRewardBufferNoBias(max_size=max_traj_count)
         self.traj_buffer = ReplayBuffer(max_traj_count, max_traj_length)
         self.llm_brain = LLMBrain(
@@ -62,7 +90,17 @@ class LLMNumOptimSemanticAgent:
             self.dim_state += 1
 
     def rollout_episode(self, world: BaseWorld, logging_file, record=True):
-        state = world.reset()
+        # deterministic seed per episode
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        if TORCH_AVAILABLE:
+            try:
+                torch.manual_seed(self.seed)
+                if torch.cuda.is_available():
+                    torch.cuda.manual_seed_all(self.seed)
+            except Exception:
+                pass
+        state = world.reset(seed=self.seed)
         state = np.expand_dims(state, axis=0)
         logging_file.write(
             f"{', '.join([str(x) for x in self.policy.get_parameters().reshape(-1)])}\n"
@@ -108,19 +146,48 @@ class LLMNumOptimSemanticAgent:
     def train_policy(self, world: BaseWorld, logdir):
 
         def parse_parameters(input_text):
-            # This regex looks for integers or floating-point numbers (including optional sign)
-            s = input_text.split("\n")[0]
-            print("response:", s)
-            pattern = re.compile(r"params\[(\d+)\]:\s*([+-]?\d+(?:\.\d+)?)")
-            matches = pattern.findall(s)
+            print("response:", input_text.split("\n")[0])
+            # Strict decimal format only (no scientific notation like 1e-3).
+            number_pattern = r'(?<![A-Za-z0-9_.])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?![A-Za-z0-9_.])'
 
-            # Convert matched strings to float (or int if you prefer to differentiate)
-            results = []
-            for match in matches:
-                results.append(float(match[1]))
-            print(results)
-            assert len(results) == self.rank
-            return np.array(results).reshape(-1)
+            def _in_range(v: float) -> bool:
+                return -6.0 <= v <= 6.0
+
+            indexed = {}
+            for idx_s, val_s in re.findall(
+                r'params\s*\[\s*(\d+)\s*\]\s*[:=]\s*(' + number_pattern + r')',
+                input_text,
+                flags=re.IGNORECASE,
+            ):
+                idx = int(idx_s)
+                if 0 <= idx < self.rank:
+                    val = float(val_s)
+                    if _in_range(val):
+                        indexed[idx] = val
+
+            if len(indexed) == self.rank:
+                return np.array([indexed[i] for i in range(self.rank)], dtype=float).reshape(-1)
+
+            candidate_lines = []
+            for line in input_text.split("\n"):
+                if "params" in line.lower():
+                    vals = [float(x) for x in re.findall(number_pattern, line)]
+                    if len(vals) >= self.rank:
+                        candidate = vals[:self.rank]
+                        if all(_in_range(v) for v in candidate):
+                            candidate_lines.append(candidate)
+            if candidate_lines:
+                return np.array(candidate_lines[-1], dtype=float).reshape(-1)
+
+            all_vals = [float(x) for x in re.findall(number_pattern, input_text)]
+            bounded_vals = [v for v in all_vals if _in_range(v)]
+            if len(bounded_vals) >= self.rank:
+                return np.array(bounded_vals[-self.rank:], dtype=float).reshape(-1)
+
+            raise ValueError(
+                f"Could not parse {self.rank} parameters from model output. "
+                f"Only found {len(bounded_vals)} in-range decimal tokens."
+            )
 
         def str_nd_examples(replay_buffer: EpisodeRewardBufferNoBias, traj_buffer: ReplayBuffer, n):
 
@@ -144,21 +211,28 @@ class LLMNumOptimSemanticAgent:
 
         # Update the policy using llm_brain, q_table and replay_buffer
         print("Updating the policy...")
-        new_parameter_list, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim_semantics(
-            str_nd_examples(self.replay_buffer, self.traj_buffer, self.rank),
-            parse_parameters,
-            self.training_episodes,
-            self.env_desc_file,
-            self.rank,
-            self.optimum,
-            self.search_step_size
-        )
-        self.api_call_time += api_time
+        update_applied = True
+        try:
+            new_parameter_list, reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim_semantics(
+                str_nd_examples(self.replay_buffer, self.traj_buffer, self.rank),
+                parse_parameters,
+                self.training_episodes,
+                self.env_desc_file,
+                self.rank,
+                self.optimum,
+                self.search_step_size
+            )
+            self.api_call_time += api_time
 
-        print(self.policy.get_parameters().shape)
-        print(new_parameter_list.shape)
-        self.policy.update_policy(new_parameter_list)
-        print(self.policy.get_parameters().shape)
+            print(self.policy.get_parameters().shape)
+            print(new_parameter_list.shape)
+            self.policy.update_policy(new_parameter_list)
+            print(self.policy.get_parameters().shape)
+        except ValueError as e:
+            update_applied = False
+            new_parameter_list = np.array(self.policy.get_parameters(), dtype=float).reshape(-1)
+            reasoning = f"Skipped update due to invalid LLM output: {e}"
+            print(f"[Parser validation] {reasoning}")
         logging_q_filename = f"{logdir}/parameters.txt"
         logging_q_file = open(logging_q_filename, "w")
         logging_q_file.write(str(self.policy))
@@ -167,7 +241,10 @@ class LLMNumOptimSemanticAgent:
         q_reasoning_file = open(q_reasoning_filename, "w")
         q_reasoning_file.write(reasoning)
         q_reasoning_file.close()
-        print("Policy updated!")
+        if update_applied:
+            print("Policy updated!")
+        else:
+            print("Policy update skipped for this episode.")
 
         # Run the episode and collect the trajectory
         print(f"Rolling out episode {self.training_episodes}...")
@@ -181,7 +258,15 @@ class LLMNumOptimSemanticAgent:
                 result = self.rollout_episode(world, logging_file, record=False)
             results.append(result)
         print(f"Results: {results}")
-        result = np.mean(results)
+        # Trim 3 highest and 3 lowest rollouts before computing statistics
+        if len(results) > 6:
+            trimmed_results = sorted(results)[3:-3]
+        else:
+            trimmed_results = results
+        result = np.mean(trimmed_results)
+        variance = np.var(trimmed_results)
+        std = np.std(trimmed_results)
+        print(f"Trimmed Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
         self.replay_buffer.add(new_parameter_list, result)
         # self.replay_buffer.sort()
 
@@ -192,7 +277,9 @@ class LLMNumOptimSemanticAgent:
         _total_episodes = self.total_episodes
         _total_steps = self.total_steps
         _total_reward = result
-        return _cpu_time, _api_time, _total_episodes, _total_steps, _total_reward
+        _variance = variance
+        _std = std
+        return _cpu_time, _api_time, _total_episodes, _total_steps, _total_reward, _variance, _std
     
 
     def evaluate_policy(self, world: BaseWorld, logdir):

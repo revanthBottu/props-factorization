@@ -35,14 +35,20 @@ class ContinualSpaceGeneralWorld(BaseWorld):
         else:
             self.discretize = False
 
-    def reset(self, new_reward=False):
+    def reset(self, new_reward=False, seed=None):
         del self.env
         if not new_reward:
+            # recreate environment
             self.env = gym.make(self.gym_env_name, render_mode=self.render_mode)
         else:
             self.env = gym.make(self.gym_env_name, render_mode=self.render_mode, healthy_reward=0)
 
-        state, _ = self.env.reset()
+        # Seed the environment reset when supported
+        try:
+            state, _ = self.env.reset(seed=seed)
+        except TypeError:
+            # Older gym versions may not accept seed kwarg on reset
+            state, _ = self.env.reset()
         self.steps = 0
         self.accu_reward = 0
         return state

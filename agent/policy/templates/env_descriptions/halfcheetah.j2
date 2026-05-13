@@ -1,0 +1,16 @@
+HalfCheetah is a 2D planar robot with a torso and six actuated joints. The objective is to run forward (positive x direction) as fast as possible while avoiding unnecessarily large torques.
+
+Observation space (17 floats) includes body position/angles (excluding absolute x), and joint/body velocities.
+
+Action space (6 floats, each in [-1, 1]) corresponds to torques on the six actuated joints.
+
+The linear policy maps state to action as:
+action = state @ W + B
+where state has shape (17,), W has shape (17, 6), and B has shape (6,).
+
+Reward combines forward progress and control penalty:
+reward = forward_reward - ctrl_cost
+
+forward_reward encourages positive x-velocity and ctrl_cost penalizes large action magnitudes.
+
+A good strategy is to produce smooth, coordinated leg motion that increases forward velocity while keeping actions moderate to limit control penalties.

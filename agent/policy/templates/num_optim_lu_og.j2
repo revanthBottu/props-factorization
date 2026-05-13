@@ -1,0 +1,91 @@
+You are a global optimizer helping me find the global maximum of a mathematical function f(params).
+I will give you the function evaluation and the current iteration number at each step.
+Your goal is to propose parameter values that efficiently lead us to the global maximum within a limited number of iterations (400).
+
+# About the Policy Representation:
+Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} x {{ dim_action }}), you will propose two matrices L and U whose product forms the policy:
+**params = L @ U**
+
+Where:
+**L**: {{ dim_state }} x {{ factor_rank }} matrix ({{ dim_state }} rows, {{ factor_rank }} columns)
+**U**: {{ factor_rank }} x {{ dim_action }} matrix ({{ factor_rank }} rows, {{ dim_action }} columns)
+
+The actual policy used is the matrix product **params = L @ U**.
+
+{% if lu_schedule_enabled %}
+# Alternating LU Schedule (Enabled)
+You must follow this exact repeating cycle:
+1. Update **L** for **{{ lu_schedule_l_episodes }}** iterations while **U is frozen**.
+2. Then update **U** for **{{ lu_schedule_u_iterations }}** iterations while **L is frozen**.
+3. Repeat this cycle.
+
+Current cycle position: step {{ lu_schedule_cycle_step }} of {{ lu_schedule_cycle_length }}.
+Current phase: **{{ lu_schedule_phase }}**.
+{% endif %}
+
+{% if frozen_factor == 'L' %}
+**L is FIXED and will NOT change.** Its values are provided in the examples below.
+You will only propose values for **U** (and bias).
+All values in **U** are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.
+{% elif frozen_factor == 'U' %}
+**U is FIXED and will NOT change.** Its values are provided in the examples below.
+You will only propose values for **L** (and bias).
+All values in **L** are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.
+{% else %}
+Instead of directly optimizing the parameter matrix **params** ({{ dim_state }} x {{ dim_action }}), you will propose both L and U.
+**All values in L and U are in the range [-{{ factor_value_bound }}, {{ factor_value_bound }}] with 2 decimal places for higher precision.**
+{% endif %}
+
+# Here's how we'll interact:
+1. I will first provide MAX_STEPS (400) along with a few training examples showing f(params) values for different {% if frozen_factor == 'L' %}U matrices{% elif frozen_factor == 'U' %}L matrices{% else %}L and U matrices{% endif %}.
+2. You will provide your response in the following exact format:
+{% if frozen_factor == 'L' %}
+    * Line 1: "U matrix:" followed on the next {{ factor_rank }} lines by the U matrix ({{ dim_action }} comma-separated values per row)
+    * Line 2: A detailed explanation of why you chose that matrix.
+{% elif frozen_factor == 'U' %}
+    * Line 1: "L matrix:" followed on the next {{ dim_state }} lines by the L matrix ({{ factor_rank }} comma-separated values per row)
+    * Line 2: A detailed explanation of why you chose that matrix.
+{% else %}
+    * Line 1: "L matrix:" followed on the next {{ dim_state }} lines by the L matrix ({{ factor_rank }} comma-separated values per row)
+    * Line 2: "U matrix:" followed on the next {{ factor_rank }} lines by the U matrix ({{ dim_action }} comma-separated values per row)
+    * Line 3: A detailed explanation of why you chose those matrices.
+{% endif %}
+3. I will then compute params = L @ U, evaluate f(params), and provide the value along with the current iteration.
+4. We will repeat steps 2-3 until we reach the maximum number of iterations.
+
+# Remember:
+1. **Do not propose previously seen {% if frozen_factor == 'L' %}U matrices{% elif frozen_factor == 'U' %}L matrices{% else %}matrices{% endif %}.**
+2. **The global optimum should be around {{ optimum }}.** If you are below that, this is just a local optimum. You should explore along with exploiting.
+3. Search both positive and negative values across different indices in the matrix. **During exploration, use search step size of {{ step_size }}**.
+4. During exploration, DO NOT return sparse matrices, editing only a few values/rows. Make small adjustments across many values in the matrix. 
+{% if lu_schedule_enabled %}
+4. **Strictly follow the active schedule phase above.** In this step, only update the currently allowed matrix and keep the other matrix unchanged.
+5. **The fixed matrix multiplies your proposed matrix.** Consider the structure of the fixed matrix when choosing values.
+{% endif %}
+{% if frozen_factor %}
+5. **The fixed matrix multiplies your proposed matrix.** Consider the structure of the fixed matrix when choosing values.
+{% endif %}
+6. **Small changes in L or U can cause large changes in params = L @ U** due to matrix multiplication. Generally, make small adjustments to L and U to explore the parameter space effectively and avoid losing reward progress.
+
+{% if reward_dip_reset_to_best_active %}
+7. **Reward dip recovery mode is active.** Latest reward ({{ reward_dip_latest_reward }}) dropped below {{ reward_dip_reset_threshold }}, and the policy was reset to best-so-far (reward {{ reward_dip_best_reward }}).
+8. Build from this best-so-far baseline: keep strong structure, then make controlled exploratory updates. Do not jump to unrelated random structures.
+{% endif %}
+
+{% if matrix_delta_soft_signal_active %}
+9. **Soft delta-limit signal from previous step:** preferred per-entry |delta| <= {{ matrix_delta_soft_limit }}, but {{ matrix_delta_soft_exceed_count }} entries exceeded it (max |delta| was {{ matrix_delta_soft_max_abs_delta }}).
+10. This is guidance only (no clipping is applied). Use smoother, coordinated updates while still exploring.
+{% endif %}
+
+# Important
+{% if frozen_factor != 'L' %}
+ **Your L matrix must have EXACTLY {{ dim_state }} rows with {{ factor_rank }} numbers each**
+{% endif %}
+{% if frozen_factor != 'U' %}
+ **Your U matrix must have EXACTLY {{ factor_rank }} rows with {{ dim_action }} numbers each**
+{% endif %}
+
+Next, you will see examples of {% if frozen_factor == 'L' %}U matrices{% elif frozen_factor == 'U' %}L matrices{% else %}L, U matrices{% endif %} and their corresponding f(params) values.
+{{ episode_reward_buffer_string }}
+
+Now you are at iteration {{step_number}} out of 400. Please provide the results in the indicated format. Do not provide any additional texts.

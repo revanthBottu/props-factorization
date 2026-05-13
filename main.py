@@ -1,12 +1,8 @@
 import yaml
 import argparse
-from runner import (
-    llm_num_optim_runner,
-)
-from runner import llm_num_optim_runner
-from runner import llm_num_optim_semantics_runner
-import gym_maze
-import gym_navigation
+from runner import llm_num_optim_runner, llm_num_optim_semantics_runner
+# import gym_maze
+# import gym_navigation
 from envs import nim, pong
 
 
@@ -22,6 +18,14 @@ def main():
 
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
+
+    print(
+        "[DEBUG main] config loaded: "
+        f"factor_rank={config.get('factor_rank')}, "
+        f"use_factorized_policy={config.get('use_factorized_policy')}, "
+        f"decomposition_type={config.get('decomposition_type', 'lu')}"
+    )
+    print(f"[DEBUG main] full config: {config}")
 
     if config["task"] in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj", "dist_state_llm_num_optim"]:
         llm_num_optim_runner.run_training_loop(**config)

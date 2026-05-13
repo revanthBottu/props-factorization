@@ -31,6 +31,11 @@ def run_training_loop(
     search_step_size=0.1,
     env_kwargs=None,
     env_desc_file=None,
+    matrix_init_mode="near_zero",
+    near_zero_init_scale=0.15,
+    near_zero_init_min_abs=0.02,
+    near_zero_init_decimals=2,
+    seed=None,
 ):
     assert task in ["dist_state_llm_num_optim_semantics", "cont_state_llm_num_optim_semantics"]
 
@@ -60,6 +65,7 @@ def run_training_loop(
             optimum,
             env_kwargs=env_kwargs,
             env_desc_file=env_desc_file,
+            seed=seed,
         )
     else:
         world = ContinualSpaceGeneralWorld(
@@ -82,6 +88,11 @@ def run_training_loop(
             optimum,
             search_step_size,
             env_desc_file=env_desc_file,
+            matrix_init_mode=matrix_init_mode,
+            near_zero_init_scale=near_zero_init_scale,
+            near_zero_init_min_abs=near_zero_init_min_abs,
+            near_zero_init_decimals=near_zero_init_decimals,
+            seed=seed,
         )
 
     print('init done')
@@ -94,7 +105,7 @@ def run_training_loop(
         agent.replay_buffer.load(warmup_dir)
     
     overall_log_file = open(f"{logdir}/overall_log.txt", "w")
-    overall_log_file.write("Iteration, CPU Time, API Time, Total Episodes, Total Steps, Total Reward\n")
+    overall_log_file.write("Iteration, CPU Time, API Time, Total Episodes, Total Steps, Total Reward, Variance, Std\n")
     overall_log_file.flush()
     for episode in range(num_episodes):
         print(f"Episode: {episode}")
@@ -105,8 +116,8 @@ def run_training_loop(
         
         for trial_idx in range(5):
             try:
-                cpu_time, api_time, total_episodes, total_steps, total_reward = agent.train_policy(world, curr_episode_dir)
-                overall_log_file.write(f"{episode + 1}, {cpu_time}, {api_time}, {total_episodes}, {total_steps}, {total_reward}\n")
+                cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std = agent.train_policy(world, curr_episode_dir)
+                overall_log_file.write(f"{episode + 1}, {cpu_time}, {api_time}, {total_episodes}, {total_steps}, {total_reward}, {variance}, {std}\n")
                 overall_log_file.flush()
                 print(f"{trial_idx + 1}th trial attempt succeeded in training")
                 break

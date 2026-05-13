@@ -1,8 +1,8 @@
 task: cont_space_llm_num_optim
-num_episodes: 120
+num_episodes: 200
 gym_env_name: HalfCheetah-v5
 render_mode: null
-logdir: logs/halfcheetah_props_lu_FR3-NZI-AS2020_noval_test2
+logdir: logs/halfcheetah_props_lu_test5
 dim_actions: 6
 dim_states: 17
 max_traj_count: 1000
@@ -27,3 +27,6 @@ matrix_init_mode: near_zero
 near_zero_init_scale: 0.15
 near_zero_init_min_abs: 0.02
 near_zero_init_decimals: 2
+enable_matrix_delta_signal: true
+enable_elite_buffer: false
+elite_buffer_size: 5

@@ -52,17 +52,29 @@ class LLMNumOptimAgent:
         near_zero_init_scale: float = 0.15,
         near_zero_init_min_abs: float = 0.02,
         near_zero_init_decimals: int = 2,
-        enable_force_new_matrix_exploration: bool = True,
-        force_new_matrix_reward_threshold: float = -100.0,
+        enable_force_new_matrix_exploration: bool = False,
+        force_new_matrix_reward_threshold: float = None,
         force_exploration_min_index_delta: float = 0.35,
         force_exploration_reference_count: int = 5,
         force_exploration_max_llm_attempts: int = 3,
         enable_limit_matrix_delta: bool = False,
         matrix_delta_limit: float = 0.2,
+        enable_matrix_delta_signal: bool = False,
         enable_reward_dip_reset_to_best: bool = False,
-        reward_dip_reset_threshold: float = -200.0,
+        reward_dip_reset_threshold: float = None,
+        enable_reward_delta_reset_to_best: bool = False,
+        reward_delta_prev_reset_threshold: float = None,
+        reward_delta_best_reset_threshold: float = None,
         enable_matrix_quality_soft_penalty_signal: bool = False,
         enable_matrix_structural_validation: bool = False,
+        enable_svd_phase_freezing: bool = False,
+        svd_phase_window: int = 15,
+        svd_phase1_variance_threshold: float = 50.0,
+        svd_phase2_variance_threshold: float = 200.0,
+        svd_phase2_mean_drop_threshold: float = 100.0,
+        enable_elite_buffer: bool = False,
+        elite_buffer_size: int = 5,
+        reward_clip_floor: float = None,
         seed: int = None,
     ):
         self.start_time = time.process_time()
@@ -106,7 +118,7 @@ class LLMNumOptimAgent:
             raise ValueError(f"near_zero_init_decimals must be >= 0, got: {self.near_zero_init_decimals}")
 
         self.enable_force_new_matrix_exploration = bool(enable_force_new_matrix_exploration)
-        self.force_new_matrix_reward_threshold = float(force_new_matrix_reward_threshold)
+        self.force_new_matrix_reward_threshold = float(force_new_matrix_reward_threshold) if force_new_matrix_reward_threshold is not None else None
         self.force_exploration_min_index_delta = float(force_exploration_min_index_delta)
         self.force_exploration_reference_count = int(force_exploration_reference_count)
         self.force_exploration_max_llm_attempts = int(force_exploration_max_llm_attempts)
@@ -126,13 +138,48 @@ class LLMNumOptimAgent:
         if self.matrix_delta_limit <= 0:
             raise ValueError(f"matrix_delta_limit must be > 0, got: {self.matrix_delta_limit}")
 
+        self.enable_matrix_delta_signal = bool(enable_matrix_delta_signal)
+
         self.enable_reward_dip_reset_to_best = bool(enable_reward_dip_reset_to_best)
-        self.reward_dip_reset_threshold = float(reward_dip_reset_threshold)
+        self.reward_dip_reset_threshold = float(reward_dip_reset_threshold) if reward_dip_reset_threshold is not None else None
+        self.enable_reward_delta_reset_to_best = bool(enable_reward_delta_reset_to_best)
+        self.reward_delta_prev_reset_threshold = float(reward_delta_prev_reset_threshold) if reward_delta_prev_reset_threshold is not None else None
+        self.reward_delta_best_reset_threshold = float(reward_delta_best_reset_threshold) if reward_delta_best_reset_threshold is not None else None
+        if self.reward_delta_prev_reset_threshold is not None and self.reward_delta_prev_reset_threshold > 0:
+            raise ValueError(
+                "reward_delta_prev_reset_threshold must be <= 0 "
+                f"(drop threshold), got: {self.reward_delta_prev_reset_threshold}"
+            )
+        if self.reward_delta_best_reset_threshold is not None and self.reward_delta_best_reset_threshold > 0:
+            raise ValueError(
+                "reward_delta_best_reset_threshold must be <= 0 "
+                f"(drop threshold), got: {self.reward_delta_best_reset_threshold}"
+            )
+
+        if self.enable_reward_dip_reset_to_best and self.reward_dip_reset_threshold is None:
+            raise ValueError("reward_dip_reset_threshold must be provided when enable_reward_dip_reset_to_best=True")
+        if self.enable_reward_delta_reset_to_best and (self.reward_delta_prev_reset_threshold is None or self.reward_delta_best_reset_threshold is None):
+            raise ValueError("reward_delta_prev_reset_threshold and reward_delta_best_reset_threshold must be provided when enable_reward_delta_reset_to_best=True")
 
         self.enable_matrix_quality_soft_penalty_signal = bool(
             enable_matrix_quality_soft_penalty_signal
         )
         self.enable_matrix_structural_validation = bool(enable_matrix_structural_validation)
+
+        self.enable_svd_phase_freezing = bool(enable_svd_phase_freezing)
+        self.svd_phase_window = int(svd_phase_window)
+        self.svd_phase1_variance_threshold = float(svd_phase1_variance_threshold)
+        self.svd_phase2_variance_threshold = float(svd_phase2_variance_threshold)
+        self.svd_phase2_mean_drop_threshold = float(svd_phase2_mean_drop_threshold)
+        if self.enable_svd_phase_freezing and str(decomposition_type or "lu").lower() != "svd":
+            raise ValueError("enable_svd_phase_freezing requires decomposition_type='svd'")
+        if self.svd_phase_window < 2:
+            raise ValueError(f"svd_phase_window must be >= 2, got: {self.svd_phase_window}")
+
+        self.enable_elite_buffer = bool(enable_elite_buffer)
+        self.elite_buffer_size = int(elite_buffer_size)
+        if self.elite_buffer_size < 1:
+            raise ValueError(f"elite_buffer_size must be >= 1, got: {self.elite_buffer_size}")
 
         self.enable_alternating_lu_schedule = bool(enable_alternating_lu_schedule)
         self.lu_schedule_l_episodes = int(lu_schedule_l_episodes)
@@ -146,6 +193,9 @@ class LLMNumOptimAgent:
                 raise ValueError("lu_schedule_l_episodes and lu_schedule_u_iterations must both be positive integers")
         # Deterministic seed for episode rollouts. If None, default to 42.
         self.seed = seed if seed is not None else 42
+
+        # Reward clipping floor for LLM prompts and logs (None means no clipping)
+        self.reward_clip_floor = float(reward_clip_floor) if reward_clip_floor is not None else None
 
         if not self.bias:
             param_count = dim_action * dim_state
@@ -167,6 +217,10 @@ class LLMNumOptimAgent:
             "enable_reward_dip_reset_to_best="
             f"{self.enable_reward_dip_reset_to_best}, "
             f"reward_dip_reset_threshold={self.reward_dip_reset_threshold}, "
+            "enable_reward_delta_reset_to_best="
+            f"{self.enable_reward_delta_reset_to_best}, "
+            f"reward_delta_prev_reset_threshold={self.reward_delta_prev_reset_threshold}, "
+            f"reward_delta_best_reset_threshold={self.reward_delta_best_reset_threshold}, "
             "enable_matrix_quality_soft_penalty_signal="
             f"{self.enable_matrix_quality_soft_penalty_signal}, "
             "enable_matrix_structural_validation="
@@ -213,7 +267,20 @@ class LLMNumOptimAgent:
         # Track rewards for visualization - separate warmup and training
         self.warmup_rewards = []
         self.training_rewards = []
-        
+
+        # SVD phase freezing state
+        self._svd_phase = 1          # 1 = all factors editable; 2 = only S editable
+        self._svd_phase2_peak_mean = float('-inf')
+        # Track best-performing factors from each SVD phase
+        self._svd_phase1_best_reward = float('-inf')
+        self._svd_phase1_best_components = None
+        self._svd_phase2_best_reward = float('-inf')
+        self._svd_phase2_best_components = None
+
+        # Elite buffer: maintain top-N best factors/rewards for prompt context
+        # Each entry is (reward, factors_dict)
+        self._elite_buffer = []
+
         # Track best reward for conditional video recording
         self.best_reward = -float('inf')
 
@@ -238,6 +305,10 @@ class LLMNumOptimAgent:
 
     def _is_groq_mode(self) -> bool:
         return getattr(self.llm_brain, "model_group", None) == "groq"
+
+    def _clip_reward(self, r):
+        r = float(r)
+        return max(r, self.reward_clip_floor) if self.reward_clip_floor is not None else r
 
     def _canonicalize_factor_name(self, factor_name):
         if factor_name is None:
@@ -342,6 +413,8 @@ class LLMNumOptimAgent:
             return False
         if not self.enable_force_new_matrix_exploration:
             return False
+        if self.force_new_matrix_reward_threshold is None:
+            return False
         latest_reward = self._latest_recorded_reward()
         return latest_reward is not None and latest_reward <= self.force_new_matrix_reward_threshold
 
@@ -359,7 +432,7 @@ class LLMNumOptimAgent:
             reset_components = {}
 
             for factor_name in self._factor_names():
-                if factor_name == effective_frozen_factor:
+                if self._frozen_check(factor_name, effective_frozen_factor):
                     reset_components[factor_name] = np.array(current_components[factor_name], copy=True)
                     continue
                 reset_components[factor_name] = self._sample_near_zero_factor_values(factor_shapes[factor_name])
@@ -504,18 +577,55 @@ class LLMNumOptimAgent:
         context = {
             "reward_dip_reset_to_best_active": False,
             "reward_dip_reset_threshold": self.reward_dip_reset_threshold,
+            "reward_dip_reset_reason": None,
             "reward_dip_latest_reward": None,
             "reward_dip_best_reward": None,
+            "reward_delta_reset_to_best_enabled": self.enable_reward_delta_reset_to_best,
+            "reward_delta_prev_reset_threshold": self.reward_delta_prev_reset_threshold,
+            "reward_delta_best_reset_threshold": self.reward_delta_best_reset_threshold,
+            "reward_dip_delta_from_prev": None,
+            "reward_dip_delta_from_best": None,
         }
-        if not self.enable_reward_dip_reset_to_best:
+        if not self.enable_reward_dip_reset_to_best and not self.enable_reward_delta_reset_to_best:
             return context
 
-        latest_reward = self._latest_recorded_reward()
-        if latest_reward is None:
+        rewards = self._extract_reward_sequence(list(self.replay_buffer.buffer))
+        if not rewards:
             return context
 
+        latest_reward = float(rewards[-1])
         context["reward_dip_latest_reward"] = latest_reward
-        if latest_reward > self.reward_dip_reset_threshold:
+
+        previous_reward = float(rewards[-2]) if len(rewards) >= 2 else None
+        best_reward_seen = float(max(rewards))
+
+        if previous_reward is not None:
+            context["reward_dip_delta_from_prev"] = latest_reward - previous_reward
+        context["reward_dip_delta_from_best"] = latest_reward - best_reward_seen
+
+        reset_reasons = []
+        if self.enable_reward_dip_reset_to_best and latest_reward <= self.reward_dip_reset_threshold:
+            reset_reasons.append(
+                f"latest reward {latest_reward:.2f} <= dip threshold {self.reward_dip_reset_threshold:.2f}"
+            )
+
+        if self.enable_reward_delta_reset_to_best:
+            if previous_reward is not None:
+                delta_from_prev = latest_reward - previous_reward
+                if delta_from_prev <= self.reward_delta_prev_reset_threshold:
+                    reset_reasons.append(
+                        "delta vs previous "
+                        f"{delta_from_prev:+.2f} <= threshold {self.reward_delta_prev_reset_threshold:+.2f}"
+                    )
+
+            delta_from_best = latest_reward - best_reward_seen
+            if delta_from_best <= self.reward_delta_best_reset_threshold:
+                reset_reasons.append(
+                    "delta vs best "
+                    f"{delta_from_best:+.2f} <= threshold {self.reward_delta_best_reset_threshold:+.2f}"
+                )
+
+        if not reset_reasons:
             return context
 
         best_payload = self._best_payload
@@ -531,10 +641,11 @@ class LLMNumOptimAgent:
 
         self._apply_policy_payload(best_payload)
         context["reward_dip_reset_to_best_active"] = True
+        context["reward_dip_reset_reason"] = " | ".join(reset_reasons)
         context["reward_dip_best_reward"] = float(best_reward)
         print(
-            "[Reward Dip Reset] "
-            f"latest reward={latest_reward:.2f} <= {self.reward_dip_reset_threshold:.2f}. "
+            "[Reward Baseline Reset] "
+            f"trigger={context['reward_dip_reset_reason']}. "
             f"Resetting policy to best-so-far reward={float(best_reward):.2f} and building from there."
         )
         return context
@@ -543,7 +654,7 @@ class LLMNumOptimAgent:
         if isinstance(payload, dict):
             flat_parts = []
             for factor_name in self._factor_names():
-                if factor_name == effective_frozen_factor:
+                if self._frozen_check(factor_name, effective_frozen_factor):
                     continue
                 if factor_name not in payload:
                     return None
@@ -572,7 +683,7 @@ class LLMNumOptimAgent:
             return False
 
         for factor_name in self._factor_names():
-            if factor_name == effective_frozen_factor:
+            if self._frozen_check(factor_name, effective_frozen_factor):
                 continue
 
             if factor_name not in candidate_components or factor_name not in current_components:
@@ -614,7 +725,7 @@ class LLMNumOptimAgent:
                 current_values = np.asarray(current_components[factor_name], dtype=float)
 
                 # Frozen factors should not be altered in this step.
-                if factor_name == effective_frozen_factor:
+                if self._frozen_check(factor_name, effective_frozen_factor):
                     continue
 
                 if candidate_values.shape != current_values.shape:
@@ -693,7 +804,8 @@ class LLMNumOptimAgent:
         """Build prompt context for latest reward deltas.
 
         Deltas are computed from the full replay history so they reflect
-        all previous matrix proposals and rewards.
+        all previous matrix proposals and rewards. All rewards are clipped
+        to reward_clip_floor for LLM display.
         """
         rewards = self._extract_reward_sequence(list(replay_buffer.buffer))
 
@@ -708,13 +820,13 @@ class LLMNumOptimAgent:
         if not rewards:
             return context
 
-        last_reward = rewards[-1]
-        best_reward = max(rewards)
+        last_reward = self._clip_reward(rewards[-1])
+        best_reward = self._clip_reward(max(rewards))
         context["last_reward"] = f"{last_reward:.2f}"
         context["delta_from_zero_reward"] = f"{last_reward:+.2f}"
         context["distance_below_zero"] = f"{max(0.0, -last_reward):.2f}"
         if len(rewards) >= 2:
-            prev_reward = rewards[-2]
+            prev_reward = self._clip_reward(rewards[-2])
             context["delta_from_prev_reward"] = f"{(last_reward - prev_reward):+.2f}"
             prev_below_zero_gap = max(0.0, -prev_reward)
             curr_below_zero_gap = max(0.0, -last_reward)
@@ -954,6 +1066,179 @@ class LLMNumOptimAgent:
                 f"phase={phase_name}, reward={reward:.2f}"
             )
 
+    def _update_elite_buffer(self, reward, factor_components):
+        """Add to elite buffer if reward is among the top N best."""
+        if not self.enable_elite_buffer or not isinstance(factor_components, dict):
+            return
+
+        cloned = self._clone_factor_components(factor_components)
+        self._elite_buffer.append((float(reward), cloned))
+        # Sort by reward (descending) and keep only top N
+        self._elite_buffer.sort(key=lambda x: x[0], reverse=True)
+        if len(self._elite_buffer) > self.elite_buffer_size:
+            self._elite_buffer = self._elite_buffer[:self.elite_buffer_size]
+
+        print(
+            f"[Elite Buffer] Added reward {reward:.2f}. "
+            f"Buffer size: {len(self._elite_buffer)}/{self.elite_buffer_size}"
+        )
+
+    def _format_elite_buffer_for_prompt(self):
+        """Format elite buffer examples for inclusion in the LLM prompt."""
+        if not self.enable_elite_buffer or not self._elite_buffer:
+            return ""
+
+        factor_names = self._factor_names()
+
+        def _display_factor_label(name):
+            if self._is_svd_factorized_policy():
+                if name == "U":
+                    return "A matrix"
+                if name == "S":
+                    return "s vector"
+                if name == "Vt":
+                    return "B matrix"
+            return f"{name} factor"
+
+        def _format_factor_block(name, value):
+            value = np.asarray(value)
+            block = f"{_display_factor_label(name)}:\n"
+            if value.ndim == 1:
+                block += ", ".join([f"{x:.2f}" for x in value]) + "\n"
+            else:
+                for row in value:
+                    block += ", ".join([f"{x:.2f}" for x in row]) + "\n"
+            return block
+
+        text = "\n[ELITE BUFFER - TOP PERFORMING CONFIGURATIONS]\n"
+        text += f"These are the {len(self._elite_buffer)} best configurations found so far:\n"
+        text += "=" * 60 + "\n\n"
+
+        for rank, (reward, factors) in enumerate(self._elite_buffer, 1):
+            clipped_reward = self._clip_reward(reward)
+            text += f"Elite #{rank}:\n"
+
+            for factor_name in factor_names:
+                if factor_name in factors:
+                    text += _format_factor_block(factor_name, factors[factor_name])
+
+            text += f"Reward: {clipped_reward:.2f}\n\n"
+
+        text += "=" * 60 + "\n"
+        return text
+
+    @staticmethod
+    def _frozen_check(factor_name, frozen_spec):
+        """Return True if factor_name is in the frozen specification (string or set)."""
+        if frozen_spec is None:
+            return False
+        if isinstance(frozen_spec, (set, frozenset)):
+            return factor_name in frozen_spec
+        return factor_name == frozen_spec
+
+    def _compute_rolling_stats(self):
+        """Return (mean, variance) of the last svd_phase_window training rewards, or (None, None)."""
+        if len(self.training_rewards) < 2:
+            return None, None
+        rewards = [self._clip_reward(r) for r in self.training_rewards[-self.svd_phase_window:]]
+        return float(np.mean(rewards)), float(np.var(rewards))
+
+    def _update_svd_phase(self):
+        """Check rolling stats and transition between SVD phases if conditions are met."""
+        if not self.enable_svd_phase_freezing or not self._is_svd_factorized_policy():
+            return
+        if len(self.training_rewards) < self.svd_phase_window:
+            return
+        mean_r, var_r = self._compute_rolling_stats()
+        if mean_r is None:
+            return
+        if self._svd_phase == 1:
+            if var_r < self.svd_phase1_variance_threshold:
+                print(
+                    f"[SVD Phase] 1 -> 2: rolling_var={var_r:.2f} < "
+                    f"threshold={self.svd_phase1_variance_threshold:.2f}. "
+                    f"Features stable — freezing U and Vt, optimizing S only. "
+                    f"Best phase 1 reward: {self._svd_phase1_best_reward:.2f}"
+                )
+                # Note: best factors from phase 1 already saved incrementally during training
+                self._svd_phase = 2
+                self._svd_phase2_peak_mean = mean_r
+        elif self._svd_phase == 2:
+            if mean_r > self._svd_phase2_peak_mean:
+                self._svd_phase2_peak_mean = mean_r
+            reward_dropping = mean_r < self._svd_phase2_peak_mean - self.svd_phase2_mean_drop_threshold
+            if var_r > self.svd_phase2_variance_threshold and reward_dropping:
+                print(
+                    f"[SVD Phase] 2 -> 1: rolling_var={var_r:.2f} > "
+                    f"threshold={self.svd_phase2_variance_threshold:.2f}, "
+                    f"mean_drop={self._svd_phase2_peak_mean - mean_r:.2f} > "
+                    f"{self.svd_phase2_mean_drop_threshold:.2f}. "
+                    f"Stuck in bad region — unfreezing U and Vt. "
+                    f"Best phase 2 reward: {self._svd_phase2_best_reward:.2f}"
+                )
+                # Restore best factors from phase 1 when returning to phase 1
+                if self._svd_phase1_best_components is not None:
+                    for factor_name in ['U', 'Vt']:
+                        if factor_name in self._svd_phase1_best_components:
+                            self.policy.factors[factor_name] = np.array(
+                                self._svd_phase1_best_components[factor_name], copy=True
+                            )
+                    self.policy.reconstruct_weight_from_factors()
+                    print(
+                        f"[SVD Phase] Restored best U and Vt from phase 1 "
+                        f"(best_reward={self._svd_phase1_best_reward:.2f})."
+                    )
+                else:
+                    print(
+                        "[SVD Phase] Warning: No saved best phase 1 components to restore."
+                    )
+                self._svd_phase = 1
+                self._svd_phase2_peak_mean = float('-inf')
+
+    def _build_rolling_phase_context(self):
+        """Return a dict of rolling stats and phase info for the LLM prompt."""
+        mean_r, var_r = self._compute_rolling_stats()
+        window = self.svd_phase_window
+        rewards_window = self.training_rewards[-window:] if self.training_rewards else []
+        peak_mean = self._svd_phase2_peak_mean
+        return {
+            "svd_phase_freezing_enabled": bool(self.enable_svd_phase_freezing),
+            "svd_current_phase": self._svd_phase,
+            "svd_phase_window": window,
+            "svd_rolling_mean": f"{mean_r:.2f}" if mean_r is not None else None,
+            "svd_rolling_variance": f"{var_r:.2f}" if var_r is not None else None,
+            "svd_phase1_variance_threshold": self.svd_phase1_variance_threshold,
+            "svd_phase2_variance_threshold": self.svd_phase2_variance_threshold,
+            "svd_phase2_mean_drop_threshold": self.svd_phase2_mean_drop_threshold,
+            "svd_phase2_peak_mean": f"{peak_mean:.2f}" if peak_mean != float('-inf') else None,
+            "svd_rolling_rewards": [f"{self._clip_reward(r):.2f}" for r in rewards_window],
+        }
+
+    def _get_frozen_set_for_phase(self):
+        """Return a frozenset of factor names that are frozen given the current phase."""
+        if self.enable_svd_phase_freezing and self._is_svd_factorized_policy():
+            if self._svd_phase == 2:
+                return frozenset(["U", "Vt"])
+            # Phase 1: all editable (fall through to static frozen_factor below)
+        if self.frozen_factor is not None:
+            return frozenset([self.frozen_factor])
+        return frozenset()
+
+    def _save_rolling_stats(self):
+        """Append current rolling stats and phase to <logdir>/rolling_stats.csv."""
+        mean_r, var_r = self._compute_rolling_stats()
+        if mean_r is None:
+            return
+        stats_path = f"{self.logdir}/rolling_stats.csv"
+        write_header = not os.path.exists(stats_path)
+        with open(stats_path, "a", encoding="utf-8") as f:
+            if write_header:
+                f.write("episode,phase,rolling_mean,rolling_variance,window\n")
+            f.write(
+                f"{self.training_episodes},{self._svd_phase},"
+                f"{mean_r:.4f},{var_r:.4f},{self.svd_phase_window}\n"
+            )
+
     def rollout_episode(self, world: BaseWorld, logging_file, record=True):
         # Ensure deterministic behavior for this episode
         self._set_global_seed(self.seed)
@@ -987,13 +1272,14 @@ class LLMNumOptimAgent:
             state = next_state
             step_idx += 1
             self.total_steps += 1
-        logging_file.write(f"Total reward: {world.get_accu_reward()}\n")
+        clipped_total_reward = self._clip_reward(world.get_accu_reward())
+        logging_file.write(f"Total reward: {clipped_total_reward}\n")
         self.total_episodes += 1
         if record:
             self.replay_buffer.add(
-                self.policy.get_parameters(), world.get_accu_reward()
+                self.policy.get_parameters(), clipped_total_reward
             )
-        return world.get_accu_reward()
+        return clipped_total_reward
 
     def record_best_episode(self, world: BaseWorld, logdir):
         """Record a video of the best performing policy."""
@@ -1099,20 +1385,54 @@ class LLMNumOptimAgent:
                 "Disabling exploitation and requesting a completely new matrix proposal."
             )
 
+        reward_baseline_reset_active = bool(
+            reward_dip_reset_context.get("reward_dip_reset_to_best_active", False)
+        )
+        reward_baseline_reset_reason = reward_dip_reset_context.get("reward_dip_reset_reason")
+        reward_baseline_best_reward = reward_dip_reset_context.get("reward_dip_best_reward")
+
         def parse_parameters(input_text):
             # This regex looks for integers or floating-point numbers (including optional sign)
-            s = input_text.split("\n")[0]
-            print("response:", s)
-            pattern = re.compile(r"params\[(\d+)\]:\s*([+-]?\d+(?:\.\d+)?)")
-            matches = pattern.findall(s)
+            lines = input_text.strip().split("\n")
 
-            # Convert matched strings to float (or int if you prefer to differentiate)
-            results = []
-            for match in matches:
-                results.append(float(match[1]))
-            print(results)
-            assert len(results) == self.rank
-            return np.array(results).reshape(-1)
+            # Try to find parameters in the text
+            pattern = re.compile(r"params\[(\d+)\]:\s*([+-]?\d+(?:\.\d+)?)")
+            results = [None] * self.rank  # Use None as placeholder for unparsed values
+            parsed_indices = set()
+
+            for line in lines:
+                matches = pattern.findall(line)
+                for idx_str, value_str in matches:
+                    try:
+                        idx = int(idx_str)
+                        if 0 <= idx < self.rank:
+                            results[idx] = float(value_str)
+                            parsed_indices.add(idx)
+                    except (ValueError, IndexError):
+                        pass
+
+            parsed_count = len(parsed_indices)
+            if parsed_count == 0:
+                # No parameters found at all - this is a real error
+                raise ValueError(
+                    f"Failed to parse any parameters from LLM output. "
+                    f"Expected format: params[0]: value, params[1]: value, etc. "
+                    f"Full response:\n{input_text}"
+                )
+
+            # Use current policy values as defaults for missing parameters
+            current_params = np.asarray(self.policy.get_parameters(), dtype=float).reshape(-1)
+            for i in range(self.rank):
+                if results[i] is None:
+                    results[i] = current_params[i]
+
+            if parsed_count < self.rank:
+                # Some parameters were missing
+                missing_count = self.rank - parsed_count
+                print(f"[WARNING] Parsed {parsed_count}/{self.rank} parameters. "
+                      f"Using current policy values for {missing_count} missing parameters.")
+
+            return np.array(results, dtype=float).reshape(-1)
         
         def parse_factor_matrices(input_text):
             """Parse decomposition factors from LLM output."""
@@ -1188,6 +1508,7 @@ class LLMNumOptimAgent:
             }
             bias_vector = []
             current_section = None
+            frozen_tampered = set()
 
             for line in lines:
                 line = line.strip()
@@ -1209,7 +1530,8 @@ class LLMNumOptimAgent:
                             bias_vector.extend(row)
                             continue
 
-                        if current_section == effective_frozen_factor:
+                        if current_section in effective_frozen_set:
+                            frozen_tampered.add(current_section)
                             continue
 
                         expected_shape = factor_shapes[current_section]
@@ -1234,9 +1556,20 @@ class LLMNumOptimAgent:
                                     f"(expected {expected_cols}): {normalized_row}"
                                 )
 
+            # Check if LLM tampered with any frozen factors
+            if frozen_tampered:
+                display_names = {"U": "A matrix (U)", "Vt": "B matrix (Vt)", "S": "singular values (S)"}
+                tampered_display = " and ".join(display_names.get(n, n) for n in sorted(frozen_tampered))
+                mark_invalid(
+                    f"You modified frozen factor(s): {tampered_display}. "
+                    "In Phase 2, only the s vector (singular values) may be changed. "
+                    "Do NOT output rows for the A matrix (U) or B matrix (Vt)."
+                )
+                return fallback_components
+
             parsed_components = {}
             for factor_name in factor_names:
-                if factor_name == effective_frozen_factor:
+                if factor_name in effective_frozen_set:
                     parsed_components[factor_name] = np.array(current_components[factor_name], copy=True)
                     continue
 
@@ -1386,7 +1719,7 @@ class LLMNumOptimAgent:
             structural_issues = []
 
             for factor_name in factor_names:
-                if factor_name == effective_frozen_factor:
+                if factor_name in effective_frozen_set:
                     continue
 
                 factor_value = np.asarray(normalized_factors[factor_name], dtype=float)
@@ -1415,7 +1748,7 @@ class LLMNumOptimAgent:
             if self._proposal_exact_match_current(
                 normalized_factors,
                 current_components,
-                effective_frozen_factor=effective_frozen_factor,
+                effective_frozen_factor=effective_frozen_set,
                 candidate_bias=bias,
                 current_bias=self.policy.bias,
             ):
@@ -1442,7 +1775,7 @@ class LLMNumOptimAgent:
 
             print("✓ Shapes validated correctly")
             for factor_name in factor_names:
-                if factor_name != effective_frozen_factor:
+                if factor_name not in effective_frozen_set:
                     print(f"{factor_name} shape: {normalized_factors[factor_name].shape}")
 
             parsed_payload = {
@@ -1468,13 +1801,43 @@ class LLMNumOptimAgent:
                 all_parameters.append((parameters.reshape(-1), reward))
 
             text = ""
+            if reward_baseline_reset_active:
+                try:
+                    best_reward_text = f"{float(reward_baseline_best_reward):.2f}"
+                except (TypeError, ValueError):
+                    best_reward_text = "N/A"
+
+                reason_text = str(reward_baseline_reset_reason).strip() if reward_baseline_reset_reason else ""
+                baseline_parameters = self._best_payload
+                if isinstance(baseline_parameters, dict) or baseline_parameters is None:
+                    baseline_parameters = self.policy.get_parameters()
+
+                baseline_parameters = np.asarray(baseline_parameters, dtype=float).reshape(-1)
+                baseline_count = min(int(n), int(baseline_parameters.size))
+
+                text += (
+                    "[BEST-REWARD BASELINE]\n"
+                    "Previous matrices were much below the best reward.\n"
+                    f"Best reward so far: {best_reward_text}.\n"
+                )
+                if reason_text:
+                    text += f"Reset trigger: {reason_text}.\n"
+                text += (
+                    "Here are the best parameters so far (current baseline).\n"
+                    "Maintain this baseline and improve upon this reward with measured edits.\n"
+                )
+                text += " ".join(
+                    [f"best_params[{i}]: {baseline_parameters[i]:.5g};" for i in range(baseline_count)]
+                )
+                text += "\n\n"
+
             if self._is_groq_mode() and len(selected_entries) > 0:
                 text += "(Groq mode) Showing latest 4 attempts + top 3 historical rewards.\n"
             for parameters, reward in all_parameters:
                 l = ""
                 for i in range(n):
                     l += f"params[{i}]: {parameters[i]:.5g}; "
-                fxy = reward
+                fxy = self._clip_reward(reward)
                 l += f"f(params): {fxy:.2f}\n"
                 text += l
             return text
@@ -1505,18 +1868,16 @@ class LLMNumOptimAgent:
 
             # ---- Frozen-factor preamble ----
             preamble = ""
-            if effective_frozen_factor is not None:
+            if effective_frozen_set:
                 current = self.policy.get_parameters(return_factors=True)
-                if effective_frozen_factor in current:
-                    preamble += (
-                        f"FIXED {effective_frozen_factor} factor "
-                        "(stays constant - do NOT change this):\n"
-                    )
-                    preamble += _format_factor_block(
-                        effective_frozen_factor,
-                        current[effective_frozen_factor],
-                    )
-                    preamble += "\n"
+                for frozen_name in sorted(effective_frozen_set):
+                    if frozen_name in current:
+                        preamble += (
+                            f"FIXED {frozen_name} factor "
+                            "(stays constant - do NOT change this):\n"
+                        )
+                        preamble += _format_factor_block(frozen_name, current[frozen_name])
+                        preamble += "\n"
 
             if svd_low_reward_reset_context.get("svd_reset_active", False):
                 current = self.policy.get_parameters(return_factors=True)
@@ -1539,9 +1900,50 @@ class LLMNumOptimAgent:
                     + "Current baseline factors after reset:\n"
                 )
                 for factor_name in factor_names:
-                    if factor_name == effective_frozen_factor:
+                    if factor_name in effective_frozen_set:
                         continue
                     preamble += _format_factor_block(factor_name, current[factor_name])
+                preamble += "\n"
+
+            if reward_baseline_reset_active:
+                current = self.policy.get_parameters(return_factors=True)
+                best_payload = self._best_payload if isinstance(self._best_payload, dict) else None
+                reason_text = str(reward_baseline_reset_reason).strip() if reward_baseline_reset_reason else ""
+
+                try:
+                    best_reward_text = f"{float(reward_baseline_best_reward):.2f}"
+                except (TypeError, ValueError):
+                    best_reward_text = "N/A"
+
+                preamble += (
+                    "[BEST-REWARD BASELINE MATRICES]\n"
+                    "Previous matrices were much below the best reward.\n"
+                    f"Best reward so far: {best_reward_text}.\n"
+                )
+                if reason_text:
+                    preamble += f"Reset trigger: {reason_text}.\n"
+                preamble += (
+                    "Here are the best matrices so far (current baseline).\n"
+                    "Maintain and improve upon this reward: preserve useful structure and make controlled edits.\n"
+                )
+
+                for factor_name in factor_names:
+                    if factor_name in effective_frozen_set:
+                        continue
+
+                    if best_payload is not None and factor_name in best_payload:
+                        baseline_factor = best_payload[factor_name]
+                    else:
+                        baseline_factor = current[factor_name]
+                    preamble += _format_factor_block(factor_name, baseline_factor)
+
+                if hasattr(self.policy, "bias") and self.policy.bias is not None:
+                    if best_payload is not None and "bias" in best_payload:
+                        baseline_bias = np.asarray(best_payload["bias"], dtype=float).reshape(-1)
+                    else:
+                        baseline_bias = np.asarray(self.policy.bias, dtype=float).reshape(-1)
+                    preamble += "bias vector:\n"
+                    preamble += ", ".join([f"{x:.2f}" for x in baseline_bias]) + "\n"
                 preamble += "\n"
 
             if force_new_matrix_exploration:
@@ -1565,23 +1967,30 @@ class LLMNumOptimAgent:
             text += "=" * 60 + "\n\n"
 
             for idx, (weights, reward) in enumerate(selected_entries, 1):
+                clipped_reward = self._clip_reward(reward)
                 if isinstance(weights, dict) and all(name in weights for name in factor_names):
                     text += f"Attempt #{idx}:\n"
 
                     for factor_name in factor_names:
-                        if factor_name == effective_frozen_factor:
+                        if factor_name in effective_frozen_set:
                             continue
                         text += _format_factor_block(factor_name, weights[factor_name])
 
-                    text += f"f(params): {reward:.2f}\n\n"
+                    text += f"f(params): {clipped_reward:.2f}\n\n"
                 else:
                     # Fallback to flat parameters
                     parameters = weights.reshape(-1)
                     text += f"Attempt #{idx}:\n"
                     text += "params: " + ", ".join([f"{x:.2g}" for x in parameters[:10]]) + "...\n"
-                    text += f"f(params): {reward:.2f}\n\n"
+                    text += f"f(params): {clipped_reward:.2f}\n\n"
 
             text += "=" * 60 + "\n"
+
+            # Append elite buffer if enabled
+            elite_text = self._format_elite_buffer_for_prompt()
+            if elite_text:
+                text += elite_text
+
             return text
 
         # Update the policy using llm_brain, q_table and replay_buffer
@@ -1636,7 +2045,26 @@ class LLMNumOptimAgent:
                 "Schedule resumes once reward is above threshold."
             )
 
-        effective_frozen_factor = current_frozen_factor
+        # Compute rolling stats and update SVD phase before building frozen set
+        self._update_svd_phase()
+        rolling_phase_context = self._build_rolling_phase_context()
+        self._save_rolling_stats()
+
+        # Build the effective frozen set (supports multi-factor freezing for SVD phases)
+        if self.enable_svd_phase_freezing and self._is_svd_factorized_policy():
+            effective_frozen_set = self._get_frozen_set_for_phase()
+        else:
+            effective_frozen_set = (
+                frozenset([current_frozen_factor]) if current_frozen_factor else frozenset()
+            )
+        # Backward-compat alias used by non-SVD methods and the LLM call
+        effective_frozen_factor = effective_frozen_set
+
+        print(
+            f"[Frozen factors] effective_frozen_set={sorted(effective_frozen_set) or 'none'}, "
+            f"svd_phase={self._svd_phase}"
+        )
+
         reward_delta_context = self._build_reward_delta_context(self.replay_buffer)
         reward_delta_context["force_new_matrix_exploration"] = force_new_matrix_exploration
         reward_delta_context["force_new_matrix_threshold"] = self.force_new_matrix_reward_threshold
@@ -1644,6 +2072,7 @@ class LLMNumOptimAgent:
         reward_delta_context["force_new_matrix_reference_count"] = self.force_exploration_reference_count
         reward_delta_context.update(reward_dip_reset_context)
         reward_delta_context.update(svd_low_reward_reset_context)
+        reward_delta_context.update(rolling_phase_context)
         reward_delta_context["matrix_invalid_reset_active"] = False
         reward_delta_context["matrix_invalid_reset_reason"] = None
         reward_delta_context["matrix_warning_signal_active"] = bool(self._last_matrix_quality_notes)
@@ -1685,6 +2114,7 @@ class LLMNumOptimAgent:
                     decomposition_type=self.decomposition_type,
                     factor_names=self._factor_names(),
                     frozen_factor=current_frozen_factor,
+                    frozen_factors=sorted(effective_frozen_set),
                     schedule_context=schedule_context,
                     reward_context=reward_delta_context,
                 )
@@ -1699,13 +2129,14 @@ class LLMNumOptimAgent:
                         "[Matrix Invalid] "
                         f"Rejected factor proposal attempt {llm_attempt_idx + 1}/{llm_attempt_budget}: {invalid_reason}"
                     )
-                    self._reset_policy_to_near_zero_baseline(
-                        effective_frozen_factor=effective_frozen_factor,
-                    )
-                    print(
-                        "[Matrix Reset] Reset editable factors to near-zero baseline "
-                        "before requesting another proposal."
-                    )
+                    if "duplicate" not in invalid_reason.lower():
+                        self._reset_policy_to_near_zero_baseline(
+                            effective_frozen_factor=effective_frozen_factor,
+                        )
+                        print(
+                            "[Matrix Reset] Reset editable factors to near-zero baseline "
+                            "before requesting another proposal."
+                        )
                     continue
 
                 candidate_components, delta_signal = self._apply_matrix_delta_limit(
@@ -1713,7 +2144,7 @@ class LLMNumOptimAgent:
                     effective_frozen_factor=effective_frozen_factor,
                 )
                 self._last_matrix_delta_signal = delta_signal
-                if delta_signal is not None and delta_signal.get("has_large_changes", False):
+                if self.enable_matrix_delta_signal and delta_signal is not None and delta_signal.get("has_large_changes", False):
                     print(
                         "[Delta Limit Soft Signal] "
                         f"{delta_signal.get('entries_exceeding_limit', 0)} factor entries exceeded "
@@ -1780,11 +2211,13 @@ class LLMNumOptimAgent:
                         "[Matrix Invalid] "
                         f"Rejected parameter proposal attempt {llm_attempt_idx + 1}/{llm_attempt_budget}: {invalid_reason}"
                     )
-                    self._reset_policy_to_near_zero_baseline(effective_frozen_factor=None)
-                    print(
-                        "[Matrix Reset] Reset parameters to near-zero baseline "
-                        "before requesting another proposal."
-                    )
+                    is_duplicate = np.array_equal(candidate_vector, current_vector)
+                    if not is_duplicate:
+                        self._reset_policy_to_near_zero_baseline(effective_frozen_factor=None)
+                        print(
+                            "[Matrix Reset] Reset parameters to near-zero baseline "
+                            "before requesting another proposal."
+                        )
                     continue
 
                 candidate_parameters, delta_signal = self._apply_matrix_delta_limit(
@@ -1792,7 +2225,7 @@ class LLMNumOptimAgent:
                     effective_frozen_factor=None,
                 )
                 self._last_matrix_delta_signal = delta_signal
-                if delta_signal is not None and delta_signal.get("has_large_changes", False):
+                if self.enable_matrix_delta_signal and delta_signal is not None and delta_signal.get("has_large_changes", False):
                     print(
                         "[Delta Limit Soft Signal] "
                         f"{delta_signal.get('entries_exceeding_limit', 0)} matrix entries exceeded "
@@ -1837,7 +2270,7 @@ class LLMNumOptimAgent:
                 result = self.rollout_episode(world, logging_file, record=False)
             results.append(result)
         print(f"Results: {results}")
-        result = np.mean(results)
+        result = self._clip_reward(np.mean(results))
         variance = np.var(results)
         std = np.std(results)
         print(f"Mean: {result:.2f}, Variance: {variance:.2f}, Std: {std:.2f}")
@@ -1865,9 +2298,32 @@ class LLMNumOptimAgent:
         self.replay_buffer.add(new_parameter_list, result)
         self._record_best_payload(new_parameter_list, result)
         self._prune_replay_buffer_for_groq()
-        
+
         # Track training rewards only
         self.training_rewards.append(result)
+
+        # Update best SVD phase components if phase freezing is enabled
+        if self.enable_svd_phase_freezing and self._is_svd_factorized_policy():
+            if self._svd_phase == 1:
+                if result > self._svd_phase1_best_reward:
+                    self._svd_phase1_best_reward = result
+                    self._svd_phase1_best_components = self._clone_factor_components(self.policy.factors)
+                    print(
+                        "[SVD Phase 1] New phase best: "
+                        f"reward={result:.2f}"
+                    )
+            elif self._svd_phase == 2:
+                if result > self._svd_phase2_best_reward:
+                    self._svd_phase2_best_reward = result
+                    self._svd_phase2_best_components = self._clone_factor_components(self.policy.factors)
+                    print(
+                        "[SVD Phase 2] New phase best: "
+                        f"reward={result:.2f}"
+                    )
+
+        # Update elite buffer if enabled
+        if self.use_factorized_policy:
+            self._update_elite_buffer(result, new_factor_components)
         
         # Record video if this is a new best reward
         if result > self.best_reward:
@@ -1891,7 +2347,8 @@ class LLMNumOptimAgent:
         _total_reward = result
         _variance = variance
         _std = std
-        return _cpu_time, _api_time, _total_episodes, _total_steps, _total_reward, _variance, _std
+        _svd_phase = self._svd_phase if self.enable_svd_phase_freezing else None
+        return _cpu_time, _api_time, _total_episodes, _total_steps, _total_reward, _variance, _std, _svd_phase
     
     def plot_reward_progress(self, logdir):
         """Plot training episode rewards (excluding warmup)."""

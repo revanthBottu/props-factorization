@@ -16,7 +16,7 @@ Example:
 import argparse
 import csv
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,31 +26,35 @@ def _normalize_header(name: str) -> str:
     return " ".join(name.strip().lower().split())
 
 
-def _compress_below_threshold(
-    values: Sequence[float],
-    threshold: Optional[float],
-    scale: float,
-) -> np.ndarray:
-    """Compress values below a threshold while keeping values above it unchanged.
+def _get_window_color(
+    value: float, lower_bound: float = -400.0, upper_bound: float = 1000.0, severity_scale: float = 600.0
+) -> Tuple[float, float, float]:
+    """Get RGB color based on distance from window [lower_bound, upper_bound].
 
-    Mapping used when compression is enabled:
-        y' = t - s * log1p(t - y), for y < t
-        y' = y, for y >= t
-
-    This preserves ordering and greatly reduces extreme negative spikes.
+    Returns blue for values within window, transitioning to red for values outside.
+    Severity increases with distance from the window.
     """
-    arr = np.asarray(values, dtype=float)
-    if threshold is None:
-        return arr
+    if lower_bound <= value <= upper_bound:
+        return (0.12, 0.47, 0.71)  # Blue #1f77b4
 
-    if scale <= 0:
-        raise ValueError(f"compression scale must be > 0, got {scale}")
+    # Calculate distance outside the window
+    if value < lower_bound:
+        distance = lower_bound - value
+    else:  # value > upper_bound
+        distance = value - upper_bound
 
-    out = np.array(arr, copy=True)
-    mask = arr < threshold
-    if np.any(mask):
-        out[mask] = threshold - (scale * np.log1p(threshold - arr[mask]))
-    return out
+    # Normalize to 0-1 range
+    severity = min(distance / severity_scale, 1.0)
+
+    # Interpolate from blue to red
+    blue_rgb = (0.12, 0.47, 0.71)  # Blue
+    red_rgb = (0.84, 0.15, 0.16)   # Red #d62728
+
+    r = blue_rgb[0] + (red_rgb[0] - blue_rgb[0]) * severity
+    g = blue_rgb[1] + (red_rgb[1] - blue_rgb[1]) * severity
+    b = blue_rgb[2] + (red_rgb[2] - blue_rgb[2]) * severity
+
+    return (r, g, b)
 
 
 def resolve_overall_log(input_path: str) -> Path:
@@ -167,6 +171,81 @@ def write_summary_csv(
             writer.writerow([ep, mean, std, n])
 
 
+def plot_raw_episodes(
+    run_series: Sequence[Dict[int, float]],
+    output_png: Path,
+    title: str,
+    source_labels: Sequence[str],
+    lower_bound: float = -400.0,
+    upper_bound: float = 1000.0,
+) -> None:
+    """Plot raw individual episode rewards with visual spike clipping."""
+    output_png.parent.mkdir(parents=True, exist_ok=True)
+    plt.figure(figsize=(14, 7))
+
+    for label, series in zip(source_labels, run_series):
+        episodes = sorted(series.keys())
+        rewards = [series[ep] for ep in episodes]
+
+        if not episodes:
+            continue
+
+        # Clip for display only (doesn't affect the actual data)
+        rewards_clipped = np.clip(rewards, lower_bound, upper_bound)
+
+        # Plot each segment with color based on whether it's outside the window
+        for i in range(len(episodes) - 1):
+            color = _get_window_color(rewards[i], lower_bound, upper_bound)
+            plt.plot(
+                episodes[i : i + 2],
+                rewards_clipped[i : i + 2],
+                color=color,
+                alpha=0.6,
+                linewidth=1.2,
+                label=label if i == 0 else "",
+            )
+
+    plt.axhline(
+        y=float(lower_bound),
+        color="#444444",
+        linestyle="--",
+        linewidth=1.0,
+        alpha=0.5,
+        label=f"window bounds ({lower_bound:g} to {upper_bound:g})",
+    )
+    plt.axhline(
+        y=float(upper_bound),
+        color="#444444",
+        linestyle="--",
+        linewidth=1.0,
+        alpha=0.5,
+    )
+
+    plt.xlabel("Episode")
+    plt.ylabel("Reward")
+    plt.title(title)
+    plt.ylim(lower_bound - 100, upper_bound + 100)
+    plt.grid(True, alpha=0.3)
+    plt.legend(loc="best")
+
+    plt.figtext(
+        0.5,
+        0.01,
+        (
+            f"Individual episode rewards | "
+            f"Blue→Red gradient indicates spike intensity outside [{lower_bound:g}, {upper_bound:g}] window | "
+            f"Rewards beyond window are clipped visually for trend visibility"
+        ),
+        ha="center",
+        fontsize=9,
+        color="#444444",
+    )
+
+    plt.tight_layout()
+    plt.savefig(output_png, dpi=150)
+    plt.close()
+
+
 def plot_combined(
     episodes: Sequence[int],
     means: np.ndarray,
@@ -176,35 +255,68 @@ def plot_combined(
     source_labels: Sequence[str],
     show_runs: bool,
     run_series: Sequence[Dict[int, float]],
-    compress_below: Optional[float],
-    compress_below_scale: float,
+    lower_bound: float = -400.0,
+    upper_bound: float = 1000.0,
 ) -> None:
     output_png.parent.mkdir(parents=True, exist_ok=True)
 
     plt.figure(figsize=(12, 7))
 
-    means_plot = _compress_below_threshold(means, compress_below, compress_below_scale)
-    lower_plot = _compress_below_threshold(means - stds, compress_below, compress_below_scale)
-    upper_plot = _compress_below_threshold(means + stds, compress_below, compress_below_scale)
+    # Clip values to window for display
+    means_plot = np.clip(means, lower_bound, upper_bound)
+    lower_plot = np.clip(means - stds, lower_bound, upper_bound)
+    upper_plot = np.clip(means + stds, lower_bound, upper_bound)
 
     if show_runs:
         for label, series in zip(source_labels, run_series):
             y = [series[ep] for ep in episodes if ep in series]
             x = [ep for ep in episodes if ep in series]
             if x:
-                y = _compress_below_threshold(y, compress_below, compress_below_scale)
-                # Keep per-run overlays visible but out of the legend.
-                plt.plot(x, y, alpha=0.25, linewidth=1.5)
+                y_clipped = np.clip(y, lower_bound, upper_bound)
+                # Color segments based on distance from window
+                for i in range(len(x) - 1):
+                    color = _get_window_color(y[i], lower_bound, upper_bound)
+                    plt.plot(
+                        x[i : i + 2],
+                        y_clipped[i : i + 2],
+                        color=color,
+                        alpha=0.25,
+                        linewidth=1.5,
+                    )
 
-    plt.plot(episodes, means_plot, color="#1f77b4", linewidth=2.5, label="mean reward")
-    plt.fill_between(
-        episodes,
-        lower_plot,
-        upper_plot,
-        color="#1f77b4",
-        alpha=0.2,
-        label="mean +/- 1 std",
-    )
+    # Plot lower bound (mean - std) with gradient coloring
+    for i in range(len(episodes) - 1):
+        color = _get_window_color(means[i] - stds[i], lower_bound, upper_bound)
+        plt.plot(
+            episodes[i : i + 2],
+            lower_plot[i : i + 2],
+            color=color,
+            alpha=0.4,
+            linewidth=1.0,
+            linestyle="--",
+        )
+
+    # Plot mean with gradient coloring
+    for i in range(len(episodes) - 1):
+        color = _get_window_color(means[i], lower_bound, upper_bound)
+        plt.plot(
+            episodes[i : i + 2],
+            means_plot[i : i + 2],
+            color=color,
+            linewidth=2.5,
+        )
+
+    # Plot upper bound (mean + std) with gradient coloring
+    for i in range(len(episodes) - 1):
+        color = _get_window_color(means[i] + stds[i], lower_bound, upper_bound)
+        plt.plot(
+            episodes[i : i + 2],
+            upper_plot[i : i + 2],
+            color=color,
+            alpha=0.4,
+            linewidth=1.0,
+            linestyle="--",
+        )
 
     # Highlight the best mean reward episode on the combined curve.
     best_idx = int(np.argmax(means))
@@ -230,37 +342,40 @@ def plot_combined(
         arrowprops=dict(arrowstyle="->", color="#d62728", lw=1),
     )
 
-    if compress_below is not None:
-        plt.axhline(
-            y=float(compress_below),
-            color="#444444",
-            linestyle="--",
-            linewidth=1.0,
-            alpha=0.6,
-            label=f"compression threshold ({compress_below:g})",
-        )
+    plt.axhline(
+        y=float(lower_bound),
+        color="#444444",
+        linestyle="--",
+        linewidth=1.0,
+        alpha=0.5,
+        label=f"window bounds ({lower_bound:g} to {upper_bound:g})",
+    )
+    plt.axhline(
+        y=float(upper_bound),
+        color="#444444",
+        linestyle="--",
+        linewidth=1.0,
+        alpha=0.5,
+    )
 
     plt.xlabel("Episode")
-    if compress_below is None:
-        plt.ylabel("Reward")
-    else:
-        plt.ylabel(f"Reward (values below {compress_below:g} compressed)")
+    plt.ylabel("Reward")
     plt.title(title)
+    plt.ylim(lower_bound - 100, upper_bound + 100)
     plt.grid(True, alpha=0.3)
     plt.legend(loc="best")
 
-    if compress_below is not None:
-        plt.figtext(
-            0.5,
-            0.01,
-            (
-                f"Below-threshold compression active: y' = t - s*log1p(t - y), "
-                f"t={compress_below:g}, s={compress_below_scale:g}"
-            ),
-            ha="center",
-            fontsize=9,
-            color="#444444",
-        )
+    plt.figtext(
+        0.5,
+        0.01,
+        (
+            f"Solid line: mean | Dashed lines: ±1 std | "
+            f"Blue→Red gradient indicates spike intensity outside [{lower_bound:g}, {upper_bound:g}] window"
+        ),
+        ha="center",
+        fontsize=9,
+        color="#444444",
+    )
 
     plt.tight_layout()
     plt.savefig(output_png, dpi=150)
@@ -304,22 +419,21 @@ def parse_args() -> argparse.Namespace:
         help="Overlay each run as a faint line.",
     )
     parser.add_argument(
-        "--compress-below",
+        "--lower-bound",
         type=float,
-        default=None,
-        help=(
-            "Optional threshold to compress values below it (for example -100). "
-            "Values above threshold stay unchanged."
-        ),
+        default=-400.0,
+        help="Lower bound of display window (default: -400).",
     )
     parser.add_argument(
-        "--compress-below-scale",
+        "--upper-bound",
         type=float,
-        default=25.0,
-        help=(
-            "Compression strength for --compress-below (default: 25.0). "
-            "Higher means more downward spread for values below threshold."
-        ),
+        default=1000.0,
+        help="Upper bound of display window (default: 1000).",
+    )
+    parser.add_argument(
+        "--raw-episodes",
+        action="store_true",
+        help="Plot individual episode rewards instead of mean/std (good for seeing trends despite spikes).",
     )
     return parser.parse_args()
 
@@ -349,36 +463,62 @@ def main() -> None:
     if not rewards_by_run:
         raise SystemExit("No usable logs were found in the provided inputs.")
 
-    episodes, means, stds, sample_counts = aggregate_rewards(
-        rewards_by_run, args.start, args.end, args.require_all
-    )
+    output_png = Path(args.output)
 
-    if not episodes:
-        raise SystemExit(
-            "No episodes available in the requested range. "
-            "Try adjusting --start/--end or remove --require-all."
+    if args.raw_episodes:
+        # Filter rewards to the requested range and plot raw episode data
+        filtered_rewards = []
+        for run in rewards_by_run:
+            filtered_run = {ep: reward for ep, reward in run.items() if args.start <= ep <= args.end}
+            if filtered_run:
+                filtered_rewards.append(filtered_run)
+
+        if not filtered_rewards:
+            raise SystemExit(
+                "No episodes available in the requested range. "
+                "Try adjusting --start/--end or remove --require-all."
+            )
+
+        plot_raw_episodes(
+            run_series=filtered_rewards,
+            output_png=output_png,
+            title=args.title,
+            source_labels=labels,
+            lower_bound=args.lower_bound,
+            upper_bound=args.upper_bound,
+        )
+        print(f"Plotted raw individual episode rewards: episodes {args.start}..{args.end}")
+    else:
+        episodes, means, stds, sample_counts = aggregate_rewards(
+            rewards_by_run, args.start, args.end, args.require_all
         )
 
-    output_png = Path(args.output)
-    plot_combined(
-        episodes=episodes,
-        means=means,
-        stds=stds,
-        output_png=output_png,
-        title=args.title,
-        source_labels=labels,
-        show_runs=args.show_runs,
-        run_series=rewards_by_run,
-        compress_below=args.compress_below,
-        compress_below_scale=args.compress_below_scale,
-    )
+        if not episodes:
+            raise SystemExit(
+                "No episodes available in the requested range. "
+                "Try adjusting --start/--end or remove --require-all."
+            )
 
-    best_idx = int(np.argmax(means))
-    best_episode = int(episodes[best_idx])
-    best_reward = float(means[best_idx])
+        plot_combined(
+            episodes=episodes,
+            means=means,
+            stds=stds,
+            output_png=output_png,
+            title=args.title,
+            source_labels=labels,
+            show_runs=args.show_runs,
+            run_series=rewards_by_run,
+            lower_bound=args.lower_bound,
+            upper_bound=args.upper_bound,
+        )
 
-    if args.summary_csv:
-        write_summary_csv(Path(args.summary_csv), episodes, means, stds, sample_counts)
+    if not args.raw_episodes:
+        best_idx = int(np.argmax(means))
+        best_episode = int(episodes[best_idx])
+        best_reward = float(means[best_idx])
+
+        if args.summary_csv:
+            write_summary_csv(Path(args.summary_csv), episodes, means, stds, sample_counts)
 
     print(f"Resolved logs: {len(resolved_logs)}")
     for idx, p in enumerate(resolved_logs, start=1):
@@ -389,16 +529,17 @@ def main() -> None:
         for p, reason in skipped_logs:
             print(f"  - {p}: {reason}")
 
-    print(f"Episodes plotted: {episodes[0]}..{episodes[-1]} ({len(episodes)} episodes)")
-    print(f"Best mean reward: episode {best_episode}, reward {best_reward:.6f}")
-    if args.compress_below is not None:
+    if not args.raw_episodes:
+        print(f"Episodes plotted: {episodes[0]}..{episodes[-1]} ({len(episodes)} episodes)")
+        print(f"Best mean reward: episode {best_episode}, reward {best_reward:.6f}")
         print(
-            "Applied below-threshold compression: "
-            f"threshold={args.compress_below:g}, scale={args.compress_below_scale:g}"
+            f"Window bounds: [{args.lower_bound:g}, {args.upper_bound:g}] "
+            f"(blue→red gradient for values outside window)"
         )
-    print(f"Saved combined plot: {output_png.resolve()}")
-    if args.summary_csv:
-        print(f"Saved summary csv: {Path(args.summary_csv).resolve()}")
+        if args.summary_csv:
+            print(f"Saved summary csv: {Path(args.summary_csv).resolve()}")
+
+    print(f"Saved plot: {output_png.resolve()}")
 
 
 if __name__ == "__main__":

@@ -20,17 +20,15 @@ Outside the LLM, your raw factors will be converted into SVD factors:
 
 Important: You do NOT need to make A or B orthonormal, and s does NOT need non-negative ordering.
 
-{% if frozen_factor == 'U' %}
-U is FIXED and will NOT change. Its values are provided in the examples below.
-You will propose s and B (and bias).
-{% elif frozen_factor == 'S' %}
-s/sigma is FIXED and will NOT change. Its values are provided in the examples below.
-You will propose A and B (and bias).
-{% elif frozen_factor == 'Vt' %}
-Vt is FIXED and will NOT change. Its values are provided in the examples below.
-You will propose A and s (and bias).
+{% if 'U' in frozen_factors and 'Vt' in frozen_factors %}
+**CURRENT PHASE: PHASE 2 (COMPUTED EXTERNALLY BY THE OPTIMIZER)**
+The optimizer has measured low reward variance and determined that feature directions have stabilized.
+U (A matrix) and Vt (B matrix) are FROZEN — you MUST NOT output them.
+Only output the s vector (singular values).
+If you output A matrix or B matrix rows, your response will be REJECTED and you will be asked to retry.
 {% else %}
-You will propose A, s, and B.
+**CURRENT PHASE: PHASE 1 (COMPUTED EXTERNALLY BY THE OPTIMIZER)**
+All factors are editable. Output A matrix, s vector, and B matrix.
 {% endif %}
 
 Every numeric value you output must stay within [-6, 6] (use 2 decimals when possible).
@@ -38,25 +36,61 @@ Every numeric value you output must stay within [-6, 6] (use 2 decimals when pos
 # Here's how we'll interact:
 1. I will first provide MAX_STEPS (400) along with training examples showing f(params) values for previous factor proposals.
 2. You will provide your response in the following exact format:
-{% if frozen_factor != 'U' %}
+{% if 'U' not in frozen_factors %}
     * A block starting with "A matrix:" followed by {{ dim_state }} lines, each with {{ factor_rank }} comma-separated values.
 {% endif %}
-{% if frozen_factor != 'S' %}
+{% if 'S' not in frozen_factors %}
     * A line starting with "s vector:" followed by {{ factor_rank }} comma-separated values.
 {% endif %}
-{% if frozen_factor != 'Vt' %}
+{% if 'Vt' not in frozen_factors %}
     * A block starting with "B matrix:" followed by {{ factor_rank }} lines, each with {{ dim_action }} comma-separated values.
 {% endif %}
     * A final line with a detailed explanation of why you chose those values.
 
 Strict output formatting rules:
 * Do not use markdown tables, code fences, bullet lists, or numbered row prefixes.
-* Do not include row labels like A[0], row 1, 1), or - before numeric rows.
+* Do not include row labels like A[0], row 1, 1, or - before numeric rows.
 * Put every matrix row on exactly one line; never split a row across multiple lines.
 * Use plain comma-separated numeric values only.
 
 3. I will convert A/s/B into U/sigma/Vt, compute params = U @ diag(sigma) @ Vt, evaluate f(params), and provide the value along with the current iteration.
 4. We will repeat steps 2-3 until we reach the maximum number of iterations.
+
+{% if svd_phase_freezing_enabled %}
+# SVD Phase Status (Computed Externally by the Optimizer)
+The optimizer monitors rolling reward statistics to automatically determine the phase.
+- Measurement window: {{ svd_phase_window }} episodes
+- Rolling mean reward: {{ svd_rolling_mean if svd_rolling_mean else 'N/A' }}
+- Rolling variance: {{ svd_rolling_variance if svd_rolling_variance else 'N/A' }}
+- **Current phase: {{ svd_current_phase }}**
+  {% if svd_current_phase == 2 %}
+  **PHASE 2: U and Vt FROZEN. Only optimize s (singular values).**
+  {% else %}
+  **PHASE 1: All factors editable. Propose A, s, and B.**
+  {% endif %}
+
+{% if svd_current_phase == 2 and svd_phase2_peak_mean %}
+- Peak mean reward in Phase 2: {{ svd_phase2_peak_mean }}
+{% endif %}
+
+{% if svd_rolling_rewards %}
+Reward history (last {{ svd_rolling_rewards | length }} episodes): {{ svd_rolling_rewards | join(', ') }}
+{% endif %}
+
+{% if svd_current_phase == 2 %}
+**PHASE 2 Instructions:**
+- The A matrix (U) and B matrix (Vt) feature directions are FIXED.
+- Only modify the s vector (singular values).
+- Increase or decrease individual singular values to scale feature contributions.
+- Do NOT output A matrix or B matrix rows under any circumstances.
+- Phase 2 will revert to Phase 1 if variance spikes and mean reward drops significantly.
+{% else %}
+**PHASE 1 Instructions:**
+- All three factors can be changed: A matrix (U), s vector, and B matrix (Vt).
+- Explore different feature directions while tuning their magnitudes.
+- Phase will advance to Phase 2 when variance drops below {{ svd_phase1_variance_threshold }}, indicating features have stabilized.
+{% endif %}
+{% endif %}
 
 # Recent Reward Signals
 - Last episode reward: {% if last_reward is not none %}{{ last_reward }}{% else %}N/A{% endif %}
@@ -74,23 +108,23 @@ Use these deltas explicitly:
 # Remember:
 1. Do not repeat an identical previously seen factor set.
 2. The global optimum should be around {{ optimum }}. If you are below that, this is still a local optimum.
-3. Search both positive and negative values where appropriate. During exploration, use search step size {{ step_size }}.
+3. Search both positive and negative values where appropriate. During exploration, use search step size {{ step_size }}. IMPORTANT: During exploitation, edit only the 100ths place of any value or the sign.
 4. Do not return sparse updates that modify only a tiny subset of values.
 5. Keep all values in [-6, 6].
 
 # Important Shape Constraints
-{% if frozen_factor != 'U' %}
+{% if 'U' not in frozen_factors %}
 Your A matrix must have EXACTLY {{ dim_state }} rows with {{ factor_rank }} numbers each.
 {% endif %}
-{% if frozen_factor != 'S' %}
+{% if 'S' not in frozen_factors %}
 Your s vector must have EXACTLY {{ factor_rank }} numbers.
 {% endif %}
-{% if frozen_factor != 'Vt' %}
+{% if 'Vt' not in frozen_factors %}
 Your B matrix must have EXACTLY {{ factor_rank }} rows with {{ dim_action }} numbers each.
 {% endif %}
 
 Formatting reminder:
-1. Only section headers (A matrix:, s vector:, B matrix:) plus numeric rows.
+1. Only section headers (A matrix:, s vector:, B matrix:) plus numeric rows for editable factors.
 2. No extra text before matrices.
 3. If uncertain, complete missing values with reasonable numbers rather than returning incomplete rows.
 

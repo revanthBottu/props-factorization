@@ -49,6 +49,9 @@ env/
 logs/
 *.log
 
+# Sessions
+sessions/
+
 # Testing
 .pytest_cache/
 .coverage

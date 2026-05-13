@@ -42,17 +42,29 @@ def run_training_loop(
     near_zero_init_scale=0.15,
     near_zero_init_min_abs=0.02,
     near_zero_init_decimals=2,
-    enable_force_new_matrix_exploration=True,
-    force_new_matrix_reward_threshold=-100.0,
+    enable_force_new_matrix_exploration=False,
+    force_new_matrix_reward_threshold=None,
     force_exploration_min_index_delta=0.35,
     force_exploration_reference_count=5,
     force_exploration_max_llm_attempts=3,
     enable_limit_matrix_delta=False,
     matrix_delta_limit=0.2,
+    enable_matrix_delta_signal=False,
     enable_reward_dip_reset_to_best=False,
-    reward_dip_reset_threshold=-200.0,
+    reward_dip_reset_threshold=None,
+    enable_reward_delta_reset_to_best=False,
+    reward_delta_prev_reset_threshold=None,
+    reward_delta_best_reset_threshold=None,
     enable_matrix_quality_soft_penalty_signal=False,
     enable_matrix_structural_validation=False,
+    enable_svd_phase_freezing=False,
+    svd_phase_window=15,
+    svd_phase1_variance_threshold=50.0,
+    svd_phase2_variance_threshold=200.0,
+    svd_phase2_mean_drop_threshold=100.0,
+    enable_elite_buffer=False,
+    elite_buffer_size=5,
+    reward_clip_floor=None,
     seed=None,
 ):
     assert task in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj", "dist_state_llm_num_optim"]
@@ -108,10 +120,22 @@ def run_training_loop(
                 force_exploration_max_llm_attempts=force_exploration_max_llm_attempts,
                 enable_limit_matrix_delta=enable_limit_matrix_delta,
                 matrix_delta_limit=matrix_delta_limit,
+                enable_matrix_delta_signal=enable_matrix_delta_signal,
                 enable_reward_dip_reset_to_best=enable_reward_dip_reset_to_best,
                 reward_dip_reset_threshold=reward_dip_reset_threshold,
+                enable_reward_delta_reset_to_best=enable_reward_delta_reset_to_best,
+                reward_delta_prev_reset_threshold=reward_delta_prev_reset_threshold,
+                reward_delta_best_reset_threshold=reward_delta_best_reset_threshold,
                 enable_matrix_quality_soft_penalty_signal=enable_matrix_quality_soft_penalty_signal,
                 enable_matrix_structural_validation=enable_matrix_structural_validation,
+                enable_svd_phase_freezing=enable_svd_phase_freezing,
+                svd_phase_window=svd_phase_window,
+                svd_phase1_variance_threshold=svd_phase1_variance_threshold,
+                svd_phase2_variance_threshold=svd_phase2_variance_threshold,
+                svd_phase2_mean_drop_threshold=svd_phase2_mean_drop_threshold,
+                enable_elite_buffer=enable_elite_buffer,
+                elite_buffer_size=elite_buffer_size,
+                reward_clip_floor=reward_clip_floor,
                 seed=seed,
             )
         elif task == "cont_space_llm_num_optim_rndm_proj":
@@ -169,7 +193,7 @@ def run_training_loop(
         agent.replay_buffer.load(warmup_dir)
     
     overall_log_file = open(f"{logdir}/overall_log.txt", "w")
-    overall_log_file.write("Iteration, CPU Time, API Time, Total Episodes, Total Steps, Total Reward, Variance, Std\n")
+    overall_log_file.write("Iteration, CPU Time, API Time, Total Episodes, Total Steps, Total Reward, Variance, Std, Phase\n")
     overall_log_file.flush()
     for episode in range(num_episodes):
         print(f"Episode: {episode}")
@@ -177,12 +201,19 @@ def run_training_loop(
         curr_episode_dir = f"{logdir}/episode_{episode}"
         print(f"Creating log directory: {curr_episode_dir}")
         os.makedirs(curr_episode_dir, exist_ok=True)
-        
+
         for trial_idx in range(5):
             try:
-                cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std = agent.train_policy(world, curr_episode_dir)
-                overall_log_file.write(f"{episode + 1}, {cpu_time}, {api_time}, {total_episodes}, {total_steps}, {total_reward}, {variance}, {std}\n")
+                cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                overall_log_file.write(f"{episode + 1}, {cpu_time}, {api_time}, {total_episodes}, {total_steps}, {total_reward}, {variance}, {std}, {phase}\n")
                 overall_log_file.flush()
+
+                # Log phase to per-episode directory
+                if phase is not None:
+                    phase_log_path = f"{curr_episode_dir}/phase_info.txt"
+                    with open(phase_log_path, "w") as f:
+                        f.write(f"SVD Phase: {phase}\n")
+
                 print(f"{trial_idx + 1}th trial attempt succeeded in training")
                 break
             except Exception as e:

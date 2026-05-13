@@ -2,7 +2,7 @@ task: cont_space_llm_num_optim
 num_episodes: 200
 gym_env_name: HalfCheetah-v5
 render_mode: null
-logdir: logs/halfcheetah_props_svd_prompt2_test1
+logdir: logs/halfcheetah_props_svd_test5
 dim_actions: 6
 dim_states: 17
 max_traj_count: 1000
@@ -22,3 +22,10 @@ factor_rank: 3
 decomposition_type: svd
 frozen_factor: null
 matrix_init_mode: near_zero
+reward_clip_floor: -200.0
+near_zero_init_scale: 0.15
+near_zero_init_min_abs: 0.02
+near_zero_init_decimals: 2
+enable_matrix_delta_signal: true
+enable_elite_buffer: true
+elite_buffer_size: 5

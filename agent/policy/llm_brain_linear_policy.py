@@ -874,6 +874,7 @@ class LLMBrain:
         decomposition_type="lu",
         factor_names=None,
         frozen_factor=None,
+        frozen_factors=None,
         schedule_context=None,
         reward_context=None,
     ):
@@ -881,6 +882,10 @@ class LLMBrain:
 
         schedule_context = schedule_context or {}
         reward_context = reward_context or {}
+
+        # Derive frozen_factors list if not supplied
+        if frozen_factors is None:
+            frozen_factors = [frozen_factor] if frozen_factor is not None else []
         force_new_matrix_exploration = bool(
             reward_context.get("force_new_matrix_exploration", False)
         )
@@ -891,8 +896,13 @@ class LLMBrain:
             reward_context.get("reward_dip_reset_to_best_active", False)
         )
         reward_dip_reset_threshold = reward_context.get("reward_dip_reset_threshold", -200.0)
+        reward_dip_reset_reason = reward_context.get("reward_dip_reset_reason")
         reward_dip_latest_reward = reward_context.get("reward_dip_latest_reward")
         reward_dip_best_reward = reward_context.get("reward_dip_best_reward")
+        reward_delta_prev_reset_threshold = reward_context.get("reward_delta_prev_reset_threshold")
+        reward_delta_best_reset_threshold = reward_context.get("reward_delta_best_reset_threshold")
+        reward_dip_delta_from_prev = reward_context.get("reward_dip_delta_from_prev")
+        reward_dip_delta_from_best = reward_context.get("reward_dip_delta_from_best")
         matrix_delta_soft_signal_enabled = bool(
             reward_context.get("matrix_delta_soft_signal_enabled", False)
         )
@@ -936,6 +946,17 @@ class LLMBrain:
                 "decomposition_type": decomposition_type,
                 "factor_names": factor_names or [],
                 "frozen_factor": frozen_factor,
+                "frozen_factors": frozen_factors,
+                "svd_phase_freezing_enabled": bool(reward_context.get("svd_phase_freezing_enabled", False)),
+                "svd_current_phase": reward_context.get("svd_current_phase", 1),
+                "svd_phase_window": reward_context.get("svd_phase_window", 15),
+                "svd_rolling_mean": reward_context.get("svd_rolling_mean"),
+                "svd_rolling_variance": reward_context.get("svd_rolling_variance"),
+                "svd_phase1_variance_threshold": reward_context.get("svd_phase1_variance_threshold"),
+                "svd_phase2_variance_threshold": reward_context.get("svd_phase2_variance_threshold"),
+                "svd_phase2_mean_drop_threshold": reward_context.get("svd_phase2_mean_drop_threshold"),
+                "svd_phase2_peak_mean": reward_context.get("svd_phase2_peak_mean"),
+                "svd_rolling_rewards": reward_context.get("svd_rolling_rewards", []),
                 "lu_schedule_enabled": bool(schedule_context.get("enabled", False)),
                 "lu_schedule_phase": schedule_context.get("phase"),
                 "lu_schedule_l_episodes": schedule_context.get("l_episodes"),
@@ -954,8 +975,13 @@ class LLMBrain:
                 "force_new_matrix_reference_count": force_new_matrix_reference_count,
                 "reward_dip_reset_to_best_active": reward_dip_reset_to_best_active,
                 "reward_dip_reset_threshold": reward_dip_reset_threshold,
+                "reward_dip_reset_reason": reward_dip_reset_reason,
                 "reward_dip_latest_reward": reward_dip_latest_reward,
                 "reward_dip_best_reward": reward_dip_best_reward,
+                "reward_delta_prev_reset_threshold": reward_delta_prev_reset_threshold,
+                "reward_delta_best_reset_threshold": reward_delta_best_reset_threshold,
+                "reward_dip_delta_from_prev": reward_dip_delta_from_prev,
+                "reward_dip_delta_from_best": reward_dip_delta_from_best,
                 "matrix_delta_soft_signal_enabled": matrix_delta_soft_signal_enabled,
                 "matrix_delta_soft_signal_active": matrix_delta_soft_signal_active,
                 "matrix_delta_soft_limit": matrix_delta_soft_limit,
@@ -979,6 +1005,7 @@ class LLMBrain:
                 dip_threshold_text = f"{float(reward_dip_reset_threshold):.2f}"
             except (TypeError, ValueError):
                 dip_threshold_text = "-200.00"
+            reason_text = str(reward_dip_reset_reason).strip() if reward_dip_reset_reason else ""
             try:
                 latest_reward_text = f"{float(reward_dip_latest_reward):.2f}"
             except (TypeError, ValueError):
@@ -987,11 +1014,27 @@ class LLMBrain:
                 best_reward_text = f"{float(reward_dip_best_reward):.2f}"
             except (TypeError, ValueError):
                 best_reward_text = "N/A"
+            try:
+                delta_prev_text = f"{float(reward_dip_delta_from_prev):+.2f}"
+            except (TypeError, ValueError):
+                delta_prev_text = "N/A"
+            try:
+                delta_best_text = f"{float(reward_dip_delta_from_best):+.2f}"
+            except (TypeError, ValueError):
+                delta_best_text = "N/A"
+            trigger_line = (
+                f"Trigger: {reason_text}."
+                if reason_text
+                else f"Latest reward ({latest_reward_text}) dropped below {dip_threshold_text}."
+            )
 
             system_prompt += (
-                "\n\n[REWARD DIP RESET BASELINE]\n"
-                f"Latest reward ({latest_reward_text}) dropped below {dip_threshold_text}.\n"
+                "\n\n[REWARD BASELINE RESET]\n"
+                f"{trigger_line}\n"
+                f"Latest reward={latest_reward_text}; best-so-far reward={best_reward_text}; "
+                f"delta_vs_prev={delta_prev_text}; delta_vs_best={delta_best_text}.\n"
                 f"Policy was reset to best-so-far baseline (reward={best_reward_text}).\n"
+                "Previous matrices were much below the best reward; the best matrices so far are provided in the context below.\n"
                 "Build off this baseline: preserve core structure that likely helped, then make measured exploratory edits.\n"
                 "Do not jump to unrelated random structures unless repeatedly failing."
             )

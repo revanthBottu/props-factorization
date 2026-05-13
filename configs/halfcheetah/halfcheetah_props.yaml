@@ -2,7 +2,7 @@ task: cont_space_llm_num_optim
 num_episodes: 200
 gym_env_name: HalfCheetah-v5
 render_mode: null
-logdir: logs/halfcheetah_props
+logdir: logs/halfcheetah_props_test3
 dim_actions: 6
 dim_states: 17
 max_traj_count: 1000
@@ -17,7 +17,4 @@ warmup_dir: null
 bias: true
 optimum: 5000
 search_step_size: 0.1
-matrix_init_mode: near_zero
-near_zero_init_scale: 0.15
-near_zero_init_min_abs: 0.02
-near_zero_init_decimals: 2
+matrix_init_mode: random

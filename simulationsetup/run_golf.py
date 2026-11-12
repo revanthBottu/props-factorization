@@ -1,7 +1,7 @@
-"""Demo: swing the club and report the ball's distance from the hole.
+"""Demo: position and swing the club, then report distance from the hole.
 
 The reusable action and observation API is in golf_env.py.  This script
-chooses one example wrist torque pulse; a controller can choose its own later.
+chooses a smooth positioning command and one example swing torque pulse.
 """
 
 import argparse
@@ -40,7 +40,7 @@ def run(headless=False, swing_torque=1.0, pulse_time=0.15, duration=5.0,
     env = GolfEnvironment()
     controller = DemoSwingController(swing_torque, pulse_time)
     model, data = env.model, env.data
-    print(f"Demo wrist torque: {swing_torque:+.2f} N m for {pulse_time:.2f} s "
+    print(f"Demo swing torque: {swing_torque:+.2f} N m for {pulse_time:.2f} s "
           f"starting at {DEMO_PULSE_START:.2f} s; active brake after contact")
 
     viewer_context = nullcontext(None)

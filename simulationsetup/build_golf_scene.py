@@ -40,7 +40,7 @@ UPPER_ARM_ANGLE = (math.acos((GRIP_Z - LINK3_Z + WRIST_DROP) / ARM_SPAN)
                    - math.atan2(0.3922, 0.425))
 ELBOW = -math.pi / 2
 WRIST_BEND = math.pi / 2 - UPPER_ARM_ANGLE
-WRIST_TURN = -math.pi / 2
+UNIVERSAL_WRIST_TURN = 0.0
 SWING_CENTER = math.pi
 BACKSWING = SWING_CENTER - 0.25
 
@@ -92,6 +92,7 @@ def build():
     # nonzero ref values only relabel those angles, so remove them here.
     for joint in robot.findall(".//joint"):
         joint.attrib.pop("ref", None)
+    robot.find(".//joint[@name='joint4']").set("damping", "0.10")
     robot.find(".//joint[@name='joint5']").set("damping", "0.05")
 
     # Four green tiles leave a real opening.  Their top faces are at z=0.
@@ -159,21 +160,25 @@ def build():
     sub(world, "camera", name="swing", pos="-0.85 0.65 1.15",
         xyaxes="-0.707 -0.707 0 0.315 -0.315 0.894", fovy="70")
 
-    # Brake five joints at the address pose, leaving one wrist joint free
-    # for the torque motor. This avoids pose sag under club weight.
+    # Brake the first four joints.  The two wrist joints remain free: joint4
+    # must turn the club from a universal reset pose to the address plane,
+    # and joint5 then swings it.  This prevents a one-action swing policy from
+    # succeeding without first positioning the club.
     equality = sub(root, "equality")
-    held_angles = [0, UPPER_ARM_ANGLE, ELBOW, WRIST_BEND, WRIST_TURN]
+    held_angles = [0, UPPER_ARM_ANGLE, ELBOW, WRIST_BEND]
     for i, angle in enumerate(held_angles):
         sub(equality, "joint", name=f"brake_joint{i}", joint1=f"joint{i}",
             polycoef=f"{angle:.9f} 0 0 0 0")
     actuators = root.find("actuator")
     actuators.clear()
+    sub(actuators, "motor", name="position_club", joint="joint4", gear="1")
     sub(actuators, "motor", name="swing", joint="joint5", gear="1")
 
     keyframe = sub(root, "keyframe")
-    qpos = [0, UPPER_ARM_ANGLE, ELBOW, WRIST_BEND, WRIST_TURN, BACKSWING,
+    qpos = [0, UPPER_ARM_ANGLE, ELBOW, WRIST_BEND,
+            UNIVERSAL_WRIST_TURN, BACKSWING,
             0, 0, BALL_RADIUS, 1, 0, 0, 0]
-    ctrl = [0]
+    ctrl = [0, 0]
     sub(keyframe, "key", name="address",
         qpos=" ".join(f"{v:.9f}" for v in qpos),
         ctrl=" ".join(f"{v:.9f}" for v in ctrl))

@@ -25,9 +25,12 @@ standard mass golf ball. The club is attached to the robot's end effector;
 the 12.7 cm long face of the head is the striking face. The upper arm is tilted
 50.4° toward the ball, with the forearm perpendicular to it. This is the
 reachable pose selected to preserve the 80 cm pedestal and 70.96 cm shaft.
-Five robot joints are braked at that pose. Only the last wrist joint (`joint5`)
-swings, driven by a direct torque motor. The demo applies an active brake and
-holds a short follow-through pose after club-to-ball contact.
+Four robot joints are braked at that pose. The two wrist joints are driven by
+direct torque motors: `joint4` turns the club into the address plane and
+`joint5` swings. Every reset starts `joint4` at a universal zero-angle pose,
+not at the ready angle of `-pi/2`, so a swing-only policy cannot hit the ball.
+The demo positions the club first, then applies an active brake and holds a
+short follow-through pose after club-to-ball contact.
 
 The green uses fixed MuJoCo contact settings: sliding friction `0.85`,
 torsional friction `0.001`, and rolling friction `0.0012` with six-dimensional
@@ -62,26 +65,25 @@ Use `--viewer browser` to choose the browser display explicitly,
 without rendering. The included `golf_hit_demo.mp4` shows the corrected
 long-face strike.
 
-`--swing-torque` selects signed wrist torque in N m, `--pulse-time` sets how
-long to apply it, and `--duration` sets total simulation time. The default
-demo applies +1 N m for 0.15 s starting at 0.05 s. MuJoCo integrates the
-resulting swing angle from torque, inertia, gravity, and contact forces. Once
-the head touches the ball, a damped controller brakes the wrist and holds it
-0.15 rad beyond the contact angle. The brake torque is capped at 28 N m,
-matching the wrist effort limit in the supplied UR5 URDF. The wrist starts
-0.25 rad behind its vertical position, so gravity contributes to the swing.
+`--swing-torque` selects signed swing torque in N m, `--pulse-time` sets how
+long to apply it, and `--duration` sets total simulation time. A smooth PD
+controller first turns `joint4` from 0 to `-pi/2`; the default demo then
+applies +1 N m to `joint5` for 0.15 s starting at 0.55 s. MuJoCo integrates
+both wrist angles from torque, inertia, gravity, and contact forces. Once the
+head touches the ball, damped controllers hold the address orientation and a
+0.15 rad swing follow-through. Both torques are capped at 28 N m, matching
+the wrist effort limits in the supplied UR5 URDF.
 The example ball stops about 30 cm short of the cup in MuJoCo 3.5, and the
 wrist's final speed is effectively zero. The saved MP4 shows the first 2.5
 seconds; the browser replay shows the whole 5-second run.
 
 For another controller, import `GolfEnvironment` from `golf_env.py` and use
-`reset()`, `step(torque_nm, substeps=1)`, and `observe()`. The returned
-observation gives the ball position, current and closest horizontal distance
-to the cup, wrist angle and angular speed, applied torque, contact history,
-and whether the ball sank. Actions accept any finite torque. The model step
-is 0.001 s, so `substeps=100` applies one torque for 0.1 s. The raw environment
-does not brake automatically; `demo_controller.py` supplies the example swing
-and braking sequence.
+`reset()`, `step((position_torque, swing_torque), substeps=1)`, and `observe()`.
+The returned observation includes both wrist states and torques, ball and cup
+distances, first-impact offset and centrality, unwanted collision counts, and
+whether the ball was hit or sunk. The model step is 0.001 s, so `substeps=100`
+holds both torques for 0.1 s. The raw environment does not brake automatically;
+`demo_controller.py` supplies the example two-joint sequence.
 
 The scene uses the USGA's [45.93 g maximum mass](https://www.usga.org/equipment-standards/equipment-rules-2019/equipment-rules/part-4-rule-3.html)
 and [42.67 mm minimum diameter](https://www.usga.org/custom-search-pages/rules/equipment-rules/rule-14611.html)
@@ -89,98 +91,78 @@ as representative ball values.
 
 ## RL task and prompted policy search
 
-`golf_rl_env.py` wraps the same scene as a Gymnasium environment. Each action
-is one wrist motor torque in N m, held for 20 physics steps (0.02 s). The
-other five UR5 joints are fixed in the scene. A shot runs for five seconds or
-until the ball sinks. The only reward is at the end of the shot:
+`golf_rl_env.py` is a current Gymnasium environment with `reset()` returning
+`(observation, info)` and `step()` returning
+`(observation, reward, terminated, truncated, info)`. Its action space is a
+two-value `Box`: positioning torque for `joint4`, then swing torque for
+`joint5`. Each action is held for 20 MuJoCo steps (0.02 s). `render_mode` may
+be `None` or `"rgb_array"`, which also makes it compatible with the world and
+video interfaces used by `props-factorization`.
+
+Reset is deterministic. `joint4` always begins at the universal `0 rad` pose
+while the useful address plane is `-pi/2 rad`. Therefore the matrix must
+control both joints; zeroing the first action column makes a swing-only policy
+miss.
+
+The episode reward is:
 
 ```text
-reward = 1 / (final_horizontal_distance_to_hole_m + 0.02)
++20                         if the club hits the ball
++30 * impact_centrality     (1 at face center, 0 at a face corner or beyond)
++30 / (1 + 4 * final_distance_m) if the ball was hit
++20                         if the ball is sunk
+-0.20 * squared normalized action changes
+-0.02 * unwanted robot-contact physics steps
 ```
 
-The maximum is 50 at the hole center. A shot that passes near the hole and
-rolls away receives a lower score based on where it finishes. Physics values
-and the initial ball/robot positions are identical on every reset. The
-environment can be used directly with `GolfRLEnv`, or through Gymnasium with
-`gym.make("golf_rl_env:GolfSwing-v0")` when `simulationsetup` is on
-`PYTHONPATH`.
+The smoothness and collision terms are emitted incrementally; shot-quality
+terms are terminal. The sum and all six components are available in
+`info["reward_components"]`. First-impact offset, centrality, both wrist
+states, and collision counts are also in `info` and the saved history.
 
-`run_golf_rl.py` uses the numerical policy search pattern from the
-`props-factorization` project: evaluate a policy matrix, show its matrix and
-reward history to an LLM, then evaluate the LLM's revised matrix. It is a
-small standalone loop inside `simulationsetup` and does not change the older
-project. The policy computes `torque = clip(observation @ matrix, -28, 28)`.
-The matrix has seven rows and one column because this scene has one moving
-joint. Rows, in order, are:
+`run_golf_rl.py` uses regular ProPS only: `action = state @ W`, with one full
+11-by-2 matrix. No LU, QR, SVD, factor matrices, ranks, or factorization
+options are used. Rows are named by `FEATURE_NAMES` and cover two positioning
+windows, three later swing windows, position error/speed/gravity feedback,
+and post-shot swing hold feedback. Columns are always:
 
-| Row | Feature | Default weight |
-| --- | --- | ---: |
-| 0 | Swing indicator from 0.05 to 0.20 s | 1 |
-| 1 | Swing indicator from 0.20 to 0.35 s | 0 |
-| 2 | Swing indicator from 0.35 to 0.60 s | 0 |
-| 3 | Swing indicator from 0.60 to 1.00 s | 0 |
-| 4 | Gravity compensation torque after hit | 1 |
-| 5 | Follow-through target minus wrist angle after hit | 40 |
-| 6 | Wrist angular speed after hit | -8 |
+1. `position_joint4_torque_nm`
+2. `swing_joint5_torque_nm`
 
-After contact, or after a one-second timeout, the first four features become
-zero and the last three turn on. The target is the contact angle plus 0.15 rad.
-The default matrix gives the demonstrated swing and active brake. The LLM may
-edit every weight, including swing timing and braking, but the 28 N m wrist
-torque limit remains fixed. The input and output matrix format is JSON:
+Each episode saves:
 
-```json
-{"matrix": [[1], [0], [0], [0], [1], [40], [-8]]}
-```
+- `reward_progress.png` plus an episode-specific reward graph snapshot;
+- `policy_heatmap_epNNN.png` for the exact 11-by-2 matrix used;
+- updated `history.json` and `best_matrix.json`;
+- an MP4 under `best_videos/` whenever a new best is found.
 
-Run an offline baseline (no API key or display required):
+The best-video rollout is replayed from reset and checked against the
+evaluated reward. `--record-video` additionally records every proposal under
+`all_videos/`. Use `--camera overview` or `--camera impact` for other views.
+
+Install and run an offline baseline (no API key or display required):
 
 ```bash
-python -m pip install gymnasium numpy mujoco
+python -m pip install gymnasium numpy mujoco matplotlib imageio imageio-ffmpeg
 cd simulationsetup
 python run_golf_rl.py
 ```
 
-To request LLM revisions through ASU Research Computing, install the API
-dependencies and fill in `OPENAI_API_KEY` in `simulationsetup/.env`, then run:
+For LLM revisions through ASU Research Computing:
 
 ```bash
 python -m pip install openai python-dotenv
-# Edit .env: OPENAI_API_KEY=your_ASU_Research_Computing_key
+# Set OPENAI_API_KEY in simulationsetup/.env or the shell.
 python run_golf_rl.py --iterations 10
 ```
 
-The `.env` file already sets `OPENAI_BASE_URL=https://openai.rc.asu.edu/v1`
-and `OPENAI_MODEL=gemma4-31b-it`, using your selected model. The
-trainer calls `OpenAI(base_url=..., api_key=...)` and uses chat completions.
-It requests plain JSON text for the revised matrix, so it does not require
-the endpoint to support JSON response mode. `.env.example` is a shareable
-template. Shell environment values take precedence over `.env`.
-The key is never written to the result files. Each training run saves `history.json` and
-`best_matrix.json` under `rl_runs/`. Re-evaluate a saved policy with
-`python run_golf_rl.py --matrix rl_runs/DATE/best_matrix.json`. The script
-validates matrix dimensions and finite values before applying any proposal.
-For a local check, run `python -m unittest test_golf_rl.py`.
+The runner uses `OPENAI_BASE_URL` and `OPENAI_MODEL` when set and never writes
+the API key to results. The LLM receives feature names, action columns, recent
+reward breakdowns, and an explicit instruction to return a complete regular
+11-by-2 matrix without factors. Re-evaluate a saved policy with
+`python run_golf_rl.py --matrix rl_runs/DATE/best_matrix.json`.
 
-### Watch policy rollouts
-
-Record every evaluated matrix, including the baseline and each LLM revision:
-
-```bash
-python -m pip install imageio imageio-ffmpeg
-python run_golf_rl.py --iterations 1 --record-video
-```
-
-The run directory printed by the command contains `trial_000.mp4` for the
-baseline and `trial_001.mp4` for the first model proposal, alongside their
-scores in `history.json`. Videos use a 30 fps MP4 and can be opened directly
-in VS Code's remote file explorer or downloaded. `--camera overview` shows
-the full green; `--camera impact` uses the close-up camera. To preview files
-in a forwarded browser, run this from `simulationsetup` and open the forwarded
-port:
-
-```bash
-python -m http.server 8765 --bind 127.0.0.1 --directory rl_runs
-```
-
-A baseline example is at `rl_runs/baseline/trial_000.mp4` in this workspace.
+Use the environment directly with `GolfRLEnv`, or through Gymnasium with
+`gym.make("golf_rl_env:GolfSwing-v0")` when `simulationsetup` is on
+`PYTHONPATH`. Run `python -m unittest test_golf_rl.py` for the API, reward,
+two-joint necessity, determinism, and prompt checks.

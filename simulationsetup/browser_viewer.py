@@ -53,7 +53,7 @@ PAGE = """<!doctype html>
     <span>Time: <strong id="time">0.00 s</strong></span>
     <span>Distance to hole: <strong id="distance">1.045 m</strong></span>
     <span>Wrist: <strong id="angle">-14.3°</strong></span>
-    <span>Motor: <strong id="torque">0.0 N m</strong></span>
+    <span>Swing motor: <strong id="torque">0.0 N m</strong></span>
     <span>Club contact: <strong id="hit">No</strong></span>
     <span>Ball sunk: <strong id="sunk">No</strong></span>
   </div>
@@ -110,7 +110,7 @@ PAGE = """<!doctype html>
 def prepare_videos(swing_torque, pulse_time, duration):
     env = GolfEnvironment()
     controller = DemoSwingController(swing_torque, pulse_time)
-    print(f"Demo wrist torque: {swing_torque:+.2f} N m for {pulse_time:.2f} s "
+    print(f"Demo swing torque: {swing_torque:+.2f} N m for {pulse_time:.2f} s "
           f"starting at {DEMO_PULSE_START:.2f} s; active brake after contact")
     renderer = mujoco.Renderer(env.model, height=480, width=640)
     samples = []

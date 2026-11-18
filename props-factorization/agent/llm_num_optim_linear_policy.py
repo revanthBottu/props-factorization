@@ -1323,7 +1323,7 @@ class LLMNumOptimAgent:
                 state = np.expand_dims(next_state, axis=0)
             
             env.close()
-            print(f"✓ Video saved to {video_dir}/ (reward: {total_reward:.2f})")
+            print(f"Video saved to {video_dir}/ (reward: {total_reward:.2f})")
             
         except Exception as e:
             print(f"Warning: Could not record video: {e}")
@@ -1781,7 +1781,7 @@ class LLMNumOptimAgent:
                     f"{self._current_matrix_structure_penalty:.3f}"
                 )
 
-            print("✓ Shapes validated correctly")
+            print("Shapes validated correctly")
             for factor_name in factor_names:
                 if factor_name not in effective_frozen_set:
                     print(f"{factor_name} shape: {normalized_factors[factor_name].shape}")
@@ -2332,7 +2332,7 @@ class LLMNumOptimAgent:
         
         # Record video if this is a new best reward
         if result > self.best_reward:
-            print(f"\n🎉 New best reward! {result:.2f} > {self.best_reward:.2f}")
+            print(f"\nNew best reward! {result:.2f} > {self.best_reward:.2f}")
             print(f"Recording video of best performance...")
             self.best_reward = result
             self.record_best_episode(world, logdir)

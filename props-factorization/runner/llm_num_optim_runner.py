@@ -250,7 +250,10 @@ def run_training_loop(
 
                 if trial_idx == 4:
                     print(f"All {trial_idx + 1} trials failed. Train terminated")
-                    exit(1)
+                    overall_log_file.close()
+                    raise RuntimeError(
+                        "ProPS training failed after five trial attempts"
+                    ) from e
                 continue
     overall_log_file.close()
     

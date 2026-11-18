@@ -1,7 +1,7 @@
-"""Demo: position and swing the club, then report distance from the hole.
+"""Preview or record a matrix-controlled six-joint golf episode.
 
-The reusable action and observation API is in golf_env.py.  This script
-chooses a smooth positioning command and one example swing torque pulse.
+The default matrix only stabilizes the neutral reset pose. Pass a learned
+``best_matrix.json`` with ``--matrix`` to replay behavior discovered by ProPS.
 """
 
 import argparse
@@ -10,121 +10,115 @@ import os
 from pathlib import Path
 import time
 
-VIDEO_FPS = 60
-VIDEO_DURATION = 2.5
 
-
-def run(headless=False, swing_torque=1.0, pulse_time=0.15, duration=5.0,
-        video_path=None, viewer_mode="auto", host="127.0.0.1", port=8765):
-    has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    browser = not headless and video_path is None and (
-        viewer_mode == "browser" or (viewer_mode == "auto" and not has_display))
-    if browser:
-        # Browser frames use offscreen OpenGL; select it before importing MuJoCo.
-        if os.environ.get("MUJOCO_GL") not in ("egl", "osmesa"):
-            os.environ["MUJOCO_GL"] = "osmesa"
-        from browser_viewer import serve_demo
-        print("No X11 display is needed for the browser view.")
-        return serve_demo(swing_torque, pulse_time, duration, host, port)
-    if not headless and video_path is None and not has_display:
-        raise RuntimeError("No X11 display is available. Use --viewer browser or --video FILE.mp4.")
-
-    # MuJoCo selects its OpenGL backend on import, so set this first.
-    if video_path is not None and os.environ.get("MUJOCO_GL") not in ("egl", "osmesa"):
+def _configure_offscreen_gl():
+    """Select a headless backend where MuJoCo supports one."""
+    if os.name != "nt" and os.environ.get("MUJOCO_GL") not in ("egl", "osmesa"):
         os.environ["MUJOCO_GL"] = "osmesa"
 
-    import mujoco
-    from demo_controller import DemoSwingController
-    from golf_env import DEMO_PULSE_START, GolfEnvironment
 
-    env = GolfEnvironment()
-    controller = DemoSwingController(swing_torque, pulse_time)
-    model, data = env.model, env.data
-    print(f"Demo swing torque: {swing_torque:+.2f} N m for {pulse_time:.2f} s "
-          f"starting at {DEMO_PULSE_START:.2f} s; active brake after contact")
+def _load_matrix(path):
+    from golf_rl_env import DEFAULT_MATRIX
+    if path is None:
+        return DEFAULT_MATRIX.copy()
+    from run_golf_rl import parse_matrix_json
+    return parse_matrix_json(Path(path).read_text(encoding="utf-8"))
 
-    viewer_context = nullcontext(None)
-    if not headless and video_path is None:
-        from mujoco import viewer as mjviewer
-        viewer_context = mjviewer.launch_passive(model, data)
 
-    renderer = writer = None
+def _print_result(result):
+    print(f"Reward: {result['reward']:.4f}")
+    print(f"Club hit: {result['ball_hit']}; centrality: "
+          f"{result['impact_centrality']:.3f}")
+    print(f"Launch speed: {result['launch_speed_m_s']:.3f} m/s; "
+          f"direction quality: {result['launch_direction_quality']:.3f}")
+    print(f"Distance from cup centre: {result['distance_to_hole_m']:.3f} m; "
+          f"sunk: {result['ball_sunk']}")
+    print(f"Closest club-face approach: "
+          f"{result['closest_club_head_distance_m']:.3f} m")
+
+
+def run(headless=False, duration=5.0, video_path=None, viewer_mode="auto",
+        host="127.0.0.1", port=8765, matrix_path=None):
+    has_display = os.name == "nt" or bool(
+        os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    )
+    browser = not headless and video_path is None and (
+        viewer_mode == "browser" or (viewer_mode == "auto" and not has_display)
+    )
+    matrix = _load_matrix(matrix_path)
+    if browser:
+        _configure_offscreen_gl()
+        from browser_viewer import serve_demo
+        return serve_demo(matrix, duration, host, port)
+
     if video_path is not None:
+        _configure_offscreen_gl()
+        from golf_rl_env import GolfRLEnv
+        from run_golf_rl import rollout
+        env = GolfRLEnv(duration_s=duration)
         try:
-            import imageio.v2 as imageio
-        except ImportError as exc:
-            raise RuntimeError(
-                "Video recording needs imageio and imageio-ffmpeg: "
-                "python -m pip install imageio imageio-ffmpeg") from exc
-        video_path = Path(video_path).expanduser().resolve()
-        video_path.parent.mkdir(parents=True, exist_ok=True)
-        renderer = mujoco.Renderer(model, height=480, width=640)
-        writer = imageio.get_writer(str(video_path), fps=VIDEO_FPS,
-                                    codec="libx264", quality=8)
+            result = rollout(matrix, env, video_path=video_path,
+                             camera="overview")
+        finally:
+            env.close()
+        print(f"Episode video: {Path(video_path).resolve()}")
+        _print_result(result)
+        return result
 
+    from golf_rl_env import GolfRLEnv, MatrixGolfPolicy
+    env = GolfRLEnv(duration_s=duration)
+    policy = MatrixGolfPolicy(matrix)
+    state, _ = env.reset()
+    viewer_context = nullcontext(None)
+    if not headless:
+        import mujoco
+        from mujoco import viewer as mjviewer
+        viewer_context = mjviewer.launch_passive(env.sim.model, env.sim.data)
+    total_reward = 0.0
     try:
         with viewer_context as viewer:
             if viewer is not None:
+                import mujoco
                 with viewer.lock():
                     viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-                    viewer.cam.fixedcamid = model.camera("overview").id
-                viewer.sync()
-            next_frame = 0
-            last_printed_second = -1
-            while data.time < duration and (viewer is None or viewer.is_running()):
-                step_start = time.perf_counter()
-                observation = env.step(controller.command(env))
-                second = int(observation["time_s"])
-                if second > last_printed_second:
-                    print(f"t={observation['time_s']:.1f}s  "
-                          f"distance={observation['distance_to_hole_m']:.3f}m  "
-                          f"wrist={observation['wrist_angle_deg']:+.1f}deg  "
-                          f"hit={observation['ball_hit']}")
-                    last_printed_second = second
-                if (writer is not None and data.time <= VIDEO_DURATION
-                        and data.time >= next_frame / VIDEO_FPS):
-                    renderer.update_scene(data, camera="swing")
-                    writer.append_data(renderer.render())
-                    next_frame += 1
+                    viewer.cam.fixedcamid = env.sim.model.camera("overview").id
+            while viewer is None or viewer.is_running():
+                started = time.perf_counter()
+                state, reward, terminated, truncated, info = env.step(
+                    policy.action(state)
+                )
+                total_reward += reward
                 if viewer is not None:
                     viewer.sync()
-                    remaining = model.opt.timestep - (time.perf_counter() - step_start)
+                    remaining = env.frame_skip * env.sim.model.opt.timestep - (
+                        time.perf_counter() - started
+                    )
                     if remaining > 0:
                         time.sleep(remaining)
+                if terminated or truncated:
+                    break
     finally:
-        if writer is not None:
-            writer.close()
-        if renderer is not None:
-            renderer.close()
-
-    if video_path is not None:
-        print(f"Demo video: {video_path}")
-
-    result = env.observe()
-    x, y, z = result["ball_position_m"]
-    print(f"Ball final position: x={x:.3f} m, y={y:.3f} m, z={z:.3f} m")
-    print(f"Distance from cup centre: {result['distance_to_hole_m']:.3f} m; "
-          f"sunk: {result['ball_sunk']}")
-    print(f"Wrist final speed: {result['swing_speed_rad_s']:.4f} rad/s")
+        env.close()
+    result = {**info, "reward": total_reward}
+    _print_result(result)
+    return result
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--headless", action="store_true", help="simulate without opening the viewer")
+    parser.add_argument("--headless", action="store_true",
+                        help="simulate without opening a viewer")
     parser.add_argument("--video", type=Path, metavar="FILE.mp4",
-                        help="record an MP4 instead of opening the viewer")
+                        help="record an MP4 instead of opening a viewer")
+    parser.add_argument("--matrix", type=Path,
+                        help="best_matrix.json from a ProPS run")
     parser.add_argument("--viewer", choices=("auto", "desktop", "browser"),
-                        default="auto", help="display mode (default: browser without X11)")
-    parser.add_argument("--host", default="127.0.0.1", help="browser viewer bind address")
-    parser.add_argument("--port", type=int, default=8765, help="browser viewer port")
-    parser.add_argument("--swing-torque", type=float, default=1.0,
-                        help="signed wrist motor torque in N m")
-    parser.add_argument("--pulse-time", type=float, default=0.15,
-                        help="seconds to apply the demo torque")
-    parser.add_argument("--duration", type=float, default=5.0,
-                        help="total simulation time in seconds")
+                        default="auto")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--duration", type=float, default=5.0)
     args = parser.parse_args()
-    if args.pulse_time <= 0 or args.duration <= 0:
-        parser.error("--pulse-time and --duration must be positive")
-    run(args.headless, args.swing_torque, args.pulse_time, args.duration,
-        args.video, args.viewer, args.host, args.port)
+    if args.duration <= 0:
+        parser.error("--duration must be positive")
+    run(args.headless, args.duration, args.video, args.viewer,
+        args.host, args.port, args.matrix)

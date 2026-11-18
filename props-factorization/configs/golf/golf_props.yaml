@@ -1,10 +1,10 @@
 task: cont_space_llm_num_optim
-num_episodes: 250
+num_episodes: 75
 gym_env_name: envs.golf:GolfSwing-v0
 render_mode: null
 logdir: logs/golf_props_num_optim
-dim_actions: 2
-dim_states: 11
+dim_actions: 6
+dim_states: 26
 max_traj_count: 1000
 max_traj_length: 250
 template_dir: agent/policy/templates
@@ -15,35 +15,56 @@ num_evaluation_episodes: 1
 warmup_episodes: 1
 warmup_dir: null
 bias: false
-optimum: 100
+optimum: 140
 search_step_size: 0.5
 parameter_min: -50.0
 parameter_max: 50.0
 parameter_decimals: 2
 task_context: >-
-  This is an 11-by-2 linear policy for a deterministic robot golf shot. The
-  two action columns are joint4 positioning torque and joint5 swing torque,
-  each clipped to +/-28 N m. Matrix weights are listed in row-major order.
-  Rows 0-1 are early positioning time windows; rows 2-4 are swing time
-  windows; rows 5-7 are joint4 gravity, target-angle error, and speed;
-  rows 8-10 are joint5 gravity, follow-through angle error, and speed after
-  the shot. Joint4 starts at 0 rad and must position the club near -pi/2 rad
-  before joint5 swings. A hit, central impact, cup proximity, and sinking
-  add reward; action changes and unwanted contacts subtract reward. Vary
-  swing timing and torque when changing positioning gains stops improving
-  the shot. Return the complete matrix, not factors.
+  This is a 26-by-6 linear policy for a deterministic robot golf shot. The
+  six action columns are torques for UR5 joints 0 through 5, clipped to their
+  URDF effort limits. Matrix weights are listed in row-major order. Rows 0-4
+  are five equal generic episode-time bins. Rows 5-10 are gravity/dynamics
+  values, rows 11-16 are angles from the all-zero reset, and rows 17-22 are
+  speeds for joints 0-5. Rows 23-25 are the world XYZ displacement from the
+  club-face center to the ball. No target pose, inverse kinematics, selected
+  swing joint, or trajectory is supplied. Contact, ball launch speed, launch
+  direction, central impact, resting cup distance, and sinking determine shot
+  reward. A capped eight-point signal tracks normalized best club-head
+  approach. Action changes and sustained torque subtract reward. Every robot
+  or club collision other than club-head/ball contact is a serious safety
+  failure: each new geometry pair costs 20 points, sustained contact costs 50
+  points per second, and the total collision penalty is capped at 250. Rollout
+  diagnostics identify the colliding geometry pairs. The warmup only
+  compensates dynamics and damps motion. Discover positioning and swing by
+  changing the complete matrix. Return the complete matrix, not factors.
 use_factorized_policy: false
 seed: 42
-# The first warmup rollout uses the working two-joint baseline.
+# Task-agnostic stabilization only; this is intentionally not a golf solution.
 initial_matrix:
-  - [0, 0]
-  - [0, 0]
-  - [0, 1]
-  - [0, 0]
-  - [0, 0]
-  - [1, 0]
-  - [20, 0]
-  - [-6, 0]
-  - [0, 1]
-  - [0, 40]
-  - [0, -8]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [1, 0, 0, 0, 0, 0]
+  - [0, 1, 0, 0, 0, 0]
+  - [0, 0, 1, 0, 0, 0]
+  - [0, 0, 0, 1, 0, 0]
+  - [0, 0, 0, 0, 1, 0]
+  - [0, 0, 0, 0, 0, 1]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [-3, 0, 0, 0, 0, 0]
+  - [0, -3, 0, 0, 0, 0]
+  - [0, 0, -3, 0, 0, 0]
+  - [0, 0, 0, -1.5, 0, 0]
+  - [0, 0, 0, 0, -1.5, 0]
+  - [0, 0, 0, 0, 0, -1.5]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]
+  - [0, 0, 0, 0, 0, 0]

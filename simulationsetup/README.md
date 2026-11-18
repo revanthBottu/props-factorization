@@ -1,188 +1,192 @@
 # UR5 golf simulation
 
-`golf_scene.xml` is a MuJoCo scene built from the supplied
-`ur5_arm_only.xml` and mesh files. The original robot model and URDF are
-unchanged. All XML dimensions are in metres.
+`golf_scene.xml` is generated from the supplied UR5 model by
+`build_golf_scene.py`. The source robot XML and URDF are unchanged. All
+MuJoCo dimensions are in metres.
+
+## Physical layout
 
 | Part | Size or placement |
 | --- | --- |
-| Lower pedestal | 60.64 × 60.64 × 10 cm |
-| Centered upper pedestal | 15.24 × 15.24 × 70 cm |
-| Margin around upper pedestal | 22.70 cm on each side |
-| Club shaft | 70.96 cm long, 1.2 cm diameter |
-| Club head | 12.7 × 3.81 × 4.13 cm |
+| Lower pedestal | 60.64 x 60.64 x 10 cm |
+| Upper pedestal | 15.24 x 15.24 x 70 cm |
+| Printed connector | `meshes/mount.STL`, loaded from millimetres at 0.001 scale |
+| PVC shaft | 70.96 cm long, 34 mm outside diameter |
+| Club head | 12.7 x 3.81 x 4.13 cm |
 | Ball | 42.67 mm diameter, 45.93 g |
 | Ball to cup center | 104.5 cm along the +X target line |
 
-**Geometry note:** The specified prism widths give `(60.64 - 15.24) / 2 =
-22.70 cm`, rather than 22.54 cm. The scene preserves both requested prism
-dimensions and centers the upper one, so its actual side margin is 22.70 cm.
-The cup has an 11 cm square opening with a recessed liner and bottom. The
-green is level with the top of the cup opening. Its sliding, torsional, and
-rolling friction coefficients are set on the ground geoms and can be tuned
-for a particular grass or carpet surface. The ball is a standard sized,
-standard mass golf ball. The club is attached to the robot's end effector;
-the 12.7 cm long face of the head is the striking face. The upper arm is tilted
-50.4° toward the ball, with the forearm perpendicular to it. This is the
-reachable pose selected to preserve the 80 cm pedestal and 70.96 cm shaft.
-Four robot joints are braked at that pose. The two wrist joints are driven by
-direct torque motors: `joint4` turns the club into the address plane and
-`joint5` swings. Every reset starts `joint4` at a universal zero-angle pose,
-not at the ready angle of `-pi/2`, so a swing-only policy cannot hit the ball.
-The demo positions the club first, then applies an active brake and holds a
-short follow-through pose after club-to-ball contact.
+The connector flange is rigidly attached to the final wrist. The original EE
+frame is retained, so the connector nub, PVC shaft, and outward axis of
+`link6` are collinear. The PVC begins 35 mm beyond the flange and overlaps the
+last 25 mm of the connector nub.
 
-The green uses fixed MuJoCo contact settings: sliding friction `0.85`,
-torsional friction `0.001`, and rolling friction `0.0012` with six-dimensional
-contact enabled. A freely rolling ball launched at 1 m/s slowed by about
-0.38 m/s² in this model, close to the roughly 0.4 m/s² reported for a ball
-rolling on a putting green in [golf-ball motion research](https://www.quinticballroll.com/research-papers/Phases-of-Motion-of-a-Golf-Ball.pdf).
-The shaft mass is 0.10 kg, the head mass is 0.25 kg, and the wrist damping is
-0.05 N m s/rad. These values stay fixed for every action.
+The shaft does not enter the center of the club head. Its center is 51.5 mm
+from the head center along the long axis, placing it at the heel with a 12 mm
+inset from the end. The shaft terminates at the top of the heel just like a
+real club rather than passing through the sweet spot.
 
-Run with Python 3.10 or newer and MuJoCo installed:
+## Task setup
 
-```bash
-python -m pip install mujoco pillow imageio imageio-ffmpeg
-cd simulationsetup
-python build_golf_scene.py
-python run_golf.py
-```
-
-With a display, the demo opens the MuJoCo desktop viewer. Without `DISPLAY`
-or `WAYLAND_DISPLAY`, it precomputes a 60 fps browser replay using offscreen
-rendering and serves each camera as one MP4. This avoids one network request
-per frame over a forwarded port.
-Open **http://127.0.0.1:8765** in your browser while the command is running.
-The page has arm-and-ball and impact cameras, replay controls, and distance,
-wrist angle, and torque readouts. If the simulation runs on a remote machine,
-forward port 8765 to your computer first (for example, with the VS Code **Ports** panel or an SSH
-tunnel). Press Ctrl+C in the terminal to stop the display. Use `--port 8766`
-if 8765 is occupied.
-
-Use `--viewer browser` to choose the browser display explicitly,
-`--video FILE.mp4` to record an MP4, or `--headless` to print distances
-without rendering. The included `golf_hit_demo.mp4` shows the corrected
-long-face strike.
-
-`--swing-torque` selects signed swing torque in N m, `--pulse-time` sets how
-long to apply it, and `--duration` sets total simulation time. A smooth PD
-controller first turns `joint4` from 0 to `-pi/2`; the default demo then
-applies +1 N m to `joint5` for 0.15 s starting at 0.55 s. MuJoCo integrates
-both wrist angles from torque, inertia, gravity, and contact forces. Once the
-head touches the ball, damped controllers hold the address orientation and a
-0.15 rad swing follow-through. Both torques are capped at 28 N m, matching
-the wrist effort limits in the supplied UR5 URDF.
-The example ball stops about 30 cm short of the cup in MuJoCo 3.5, and the
-wrist's final speed is effectively zero. The saved MP4 shows the first 2.5
-seconds; the browser replay shows the whole 5-second run.
-
-For another controller, import `GolfEnvironment` from `golf_env.py` and use
-`reset()`, `step((position_torque, swing_torque), substeps=1)`, and `observe()`.
-The returned observation includes both wrist states and torques, ball and cup
-distances, first-impact offset and centrality, unwanted collision counts, and
-whether the ball was hit or sunk. The model step is 0.001 s, so `substeps=100`
-holds both torques for 0.1 s. The raw environment does not brake automatically;
-`demo_controller.py` supplies the example two-joint sequence.
-
-The scene uses the USGA's [45.93 g maximum mass](https://www.usga.org/equipment-standards/equipment-rules-2019/equipment-rules/part-4-rule-3.html)
-and [42.67 mm minimum diameter](https://www.usga.org/custom-search-pages/rules/equipment-rules/rule-14611.html)
-as representative ball values.
-
-## RL task and prompted policy search
-
-`golf_rl_env.py` is a current Gymnasium environment with `reset()` returning
-`(observation, info)` and `step()` returning
-`(observation, reward, terminated, truncated, info)`. Its action space is a
-two-value `Box`: positioning torque for `joint4`, then swing torque for
-`joint5`. Each action is held for 20 MuJoCo steps (0.02 s). `render_mode` may
-be `None` or `"rgb_array"`, which also makes it compatible with the world and
-video interfaces used by `props-factorization`.
-
-Reset is deterministic. `joint4` always begins at the universal `0 rad` pose
-while the useful address plane is `-pi/2 rad`. Therefore the matrix must
-control both joints; zeroing the first action column makes a swing-only policy
-miss.
-
-The episode reward is:
+All six UR5 joints are free and directly torque controlled. Every episode
+uses one deterministic `universal` keyframe:
 
 ```text
-+20                         if the club hits the ball
-+30 * impact_centrality     (1 at face center, 0 at a face corner or beyond)
-+30 / (1 + 4 * final_distance_m) if the ball was hit
-+20                         if the ball is sunk
--0.20 * squared normalized action changes
--0.02 * unwanted robot-contact physics steps
+joint angles: [0, 0, 0, 0, 0, 0] rad
 ```
 
-The smoothness and collision terms are emitted incrementally; shot-quality
-terms are terminal. The sum and all six components are available in
-`info["reward_components"]`. First-impact offset, centrality, both wrist
-states, and collision counts are also in `info`. Older standalone runs saved
-these in `rl_runs/*/history.json`.
+This is only a repeatable neutral reset. There is no address keyframe,
+inverse-kinematic pose, designated swing joint, timed pulse, follow-through
+hold, or valid-pose gate. Any physical club-head contact with the ball counts
+as a hit. ProPS must learn how to position the complete arm, orient the face,
+and generate a swing.
 
-The golf task is registered as `envs.golf:GolfSwing-v0` for the same
-`ContinualSpaceGeneralWorld`, linear policy agent, YAML configuration, and
-training loop used by the other ProPS Gymnasium tasks. Its configuration is
-`props-factorization/configs/golf/golf_props.yaml`. It uses the same
-`num_optim.j2` prompt template as the other numerical ProPS tasks; the
-config supplies this task's parameter range and brief environment context.
-It uses regular ProPS:
-`action = state @ W`, with one full 11-by-2 matrix. Rows are named by
-`FEATURE_NAMES` and cover two positioning windows, three later swing windows,
-position error/speed/gravity feedback, and post-shot swing hold feedback.
-Columns are always:
+The robot is placed beside the ball at `(0.0, -0.55)` without solving its
+joints toward the ball. The environment exposes joint state and club-to-ball
+state but does not expose a target robot configuration.
 
-1. `position_joint4_torque_nm`
-2. `swing_joint5_torque_nm`
+## Matrix controller
 
-New runs use the same log layout as `props-llm-1` under
-`props-factorization/logs/golf_props_num_optim/`: `overall_log.txt`, a `warmup/`
-directory containing `warmup_rollout_0.txt` and plots, and one `episode_N/`
-directory per LLM proposal. Each episode directory contains `parameters.txt`,
-`parameters_reasoning.txt`, `training_rollout.txt`, `reward_progress.png`,
-`policy_heatmap_epN.png`, and `best_videos/` when a new best is recorded.
-The run root receives `policy_heatmaps.gif` when training completes. The
-first warmup uses the demonstrated two-joint matrix from the config.
-Earlier standalone `rl_runs/` histories remain in their original format;
-they do not contain the per-step trajectories needed for ProPS rollout logs.
+Regular ProPS directly edits one unfactorized `26 x 6` matrix:
 
-From an environment with the ProPS and golf dependencies installed, run a
-warmup-only check without an API call from the repository root:
+```text
+action[1 x 6] = features[1 x 26] @ W[26 x 6]
+```
 
-```bash
+Columns 0-5 are torques for joints 0-5. Joints 0-2 are clipped to +/-150 Nm;
+joints 3-5 are clipped to +/-28 Nm.
+
+| Rows | Controller features |
+| --- | --- |
+| 0-4 | Five equal episode-time bins |
+| 5-10 | Model gravity/Coriolis/dynamics torque for joints 0-5 |
+| 11-16 | Joint angles measured from the neutral reset |
+| 17-22 | Joint angular speeds |
+| 23-25 | World XYZ vector from the club-face center to the ball |
+
+The time rows allow ProPS to discover an open-loop sequence. Joint and
+club-to-ball rows allow it to build feedback and cross-joint coordination.
+Every matrix entry is editable, so an observation from any row can influence
+any of the six joint torques.
+
+The warmup matrix is deliberately not a golf solution. It contains only:
+
+- diagonal model-dynamics compensation;
+- modest diagonal velocity damping; and
+- zero positioning, orientation, and swing weights.
+
+It therefore holds the universal pose and does not hit the ball. This gives
+the LLM a numerically stable starting controller while leaving all golf
+behavior to be learned from reward. Factorization remains disabled.
+
+## Reward
+
+Terminal shot quality has a maximum of 140 points:
+
+```text
++10                              club-head contact
++10 x min(launch_speed / 2, 1)   ball launch speed
++10 x launch_direction_quality   launch direction toward the cup
++40 x impact_centrality          face-center quality
++40 / (1 + 4 x resting_distance) cup proximity after a hit
++30                              sunk ball
+```
+
+After a hit, the episode terminates once translational ball speed remains at
+or below 0.03 m/s for 0.5 seconds. The distance term therefore uses the
+resting result when the ball settles before the five-second timeout.
+
+Incremental terms are:
+
+```text
++8 x best-distance reduction / initial club distance (maximum +8)
+-0.20 x squared normalized action changes
+-0.005 x squared normalized torque each controller step
+-20 per newly colliding unwanted geometry pair
+-50 per second of sustained unwanted collision (total collision cap: -250)
+```
+
+The approach term is intentionally small. It gives feedback before the first
+successful hit without overpowering hit quality or final ball outcome. The
+collision cap is larger than the entire 140-point terminal shot reward, so a
+collision-heavy trajectory cannot beat a clean shot. Unwanted contacts include
+robot-ground, robot-pedestal, club-ground, club-pedestal, cup, and robot
+self-collisions. The intended club-head/ball contact and ordinary ball-ground
+contact are excluded. `info["active_collision_pairs"]` and
+`info["collision_pair_events"]` identify the exact geometries involved. The
+complete breakdown is available in `info["reward_components"]`.
+
+## Running
+
+From the repository root:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
 cd simulationsetup
-OPENAI_API_KEY=test-only python run_golf_rl.py --iterations 0
+python build_golf_scene.py
+python -m unittest test_golf_rl.py
 ```
 
-For LLM training through ASU Research Computing, set `OPENAI_API_KEY` in
-`simulationsetup/.env` or the shell, then run either:
+Preview the neutral stabilizing baseline:
 
-```bash
-cd props-factorization
-python main.py --config configs/golf/golf_props.yaml
+```powershell
+python run_golf.py --headless
+python run_golf.py --video neutral_preview.mp4
 ```
 
-or, from the repository's `simulationsetup` directory:
+Run regular ProPS through the shared runner:
 
-```bash
+```powershell
 python run_golf_rl.py --iterations 10
 ```
 
-Both commands use the same ProPS runner and log format. The wrapper accepts
-`--output-dir`, `--model`, and `--matrix` to override the config; a matrix
-file must contain an 11-by-2 `matrix` field and becomes the first warmup
-policy. The config selects `asu/gemma4-31b-it` by default. The ASU provider
-uses `OPENAI_BASE_URL` if set, otherwise `https://openai.rc.asu.edu/v1`.
-The API key is never written to the log files. The config supplies the
-11 state row groups and both action columns as prompt context, and the
-generic template requests the full unfactorized matrix in ProPS `params[i]`
-format.
+Run three independent sequential tests:
 
-Use the environment directly with `GolfRLEnv`, or through Gymnasium with
-`gym.make("golf_rl_env:GolfSwing-v0")` when `simulationsetup` is on
-`PYTHONPATH`. Run `python -m unittest test_golf_rl.py` for the API, reward,
-two-joint necessity, determinism, and standalone helper checks. From the
-inner `props-factorization` directory, run
-`python -m unittest test_golf_props_integration.py` for the shared runner and
-ProPS log layout.
+```powershell
+python run_three_golf_tests.py
+```
+
+The script reads `num_episodes`, `seed`, `llm_model_name`, `logdir`, and all
+other training settings directly from `golf_props.yaml`. With the current
+YAML, it runs 250 episodes per test with seeds 42, 43, and 44. If the YAML
+contains:
+
+```yaml
+logdir: logs/golf_props_num_optim
+```
+
+the three result directories are:
+
+```text
+..\props-factorization\logs\golf_props_num_optim\
+..\props-factorization\logs\golf_props_num_optim_1\
+..\props-factorization\logs\golf_props_num_optim_2\
+```
+
+Existing logs are never overwritten. If any of those directories already
+exist, the script automatically advances to the first unused consecutive
+sequence. A sibling batch-manifest JSON is updated after every test, including
+failure or interruption status. Change episode count, model, base seed, or log
+name in the YAML; the only script-level setting is the number of repetitions:
+
+```powershell
+python run_three_golf_tests.py --runs 3
+```
+
+Replay a learned matrix:
+
+```powershell
+python run_golf.py --matrix path\to\best_matrix.json --video learned_shot.mp4
+```
+
+The golf configuration is
+`props-factorization/configs/golf/golf_props.yaml`. Each shared-runner episode
+writes the reward graph and full `26 x 6` heatmap. New best policies receive a
+video, and the run root receives an animated heatmap GIF.
+
+Run the shared integration test from `props-factorization`:
+
+```powershell
+cd ..\props-factorization
+python -m unittest test_golf_props_integration.py
+```

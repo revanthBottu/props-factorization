@@ -10,11 +10,10 @@ from urllib.parse import urlparse
 import imageio.v2 as imageio
 import mujoco
 
-from demo_controller import DemoSwingController
-from golf_env import DEMO_PULSE_START, GolfEnvironment
+from golf_rl_env import GolfRLEnv, MatrixGolfPolicy
 
 
-FPS = 60
+FPS = 50
 CAMERAS = ("swing", "impact")
 
 PAGE = """<!doctype html>
@@ -52,8 +51,8 @@ PAGE = """<!doctype html>
   <div class="stats">
     <span>Time: <strong id="time">0.00 s</strong></span>
     <span>Distance to hole: <strong id="distance">1.045 m</strong></span>
-    <span>Wrist: <strong id="angle">-14.3°</strong></span>
-    <span>Swing motor: <strong id="torque">0.0 N m</strong></span>
+    <span>Club-to-ball: <strong id="club">0.000 m</strong></span>
+    <span>Max joint torque: <strong id="torque">0.0 N m</strong></span>
     <span>Club contact: <strong id="hit">No</strong></span>
     <span>Ball sunk: <strong id="sunk">No</strong></span>
   </div>
@@ -61,7 +60,7 @@ PAGE = """<!doctype html>
 <script>
   const scene = document.getElementById('scene');
   const camera = document.getElementById('camera');
-  let samples = [], fps = 60;
+  let samples = [], fps = 50;
   function updateMetrics() {
     const frame = Math.min(samples.length - 1, Math.round(scene.currentTime * fps));
     const observation = samples[frame];
@@ -69,10 +68,10 @@ PAGE = """<!doctype html>
     document.getElementById('time').textContent = observation.time_s.toFixed(2) + ' s';
     document.getElementById('distance').textContent =
       observation.distance_to_hole_m.toFixed(3) + ' m';
-    document.getElementById('angle').textContent =
-      observation.wrist_angle_deg.toFixed(1) + '°';
+    document.getElementById('club').textContent =
+      observation.club_head_distance_to_ball_m.toFixed(3) + ' m';
     document.getElementById('torque').textContent =
-      observation.motor_torque_nm.toFixed(2) + ' N m';
+      Math.max(...observation.action_torques_nm.map(Math.abs)).toFixed(2) + ' N m';
     document.getElementById('hit').textContent = observation.ball_hit ? 'Yes' : 'No';
     document.getElementById('sunk').textContent = observation.ball_sunk ? 'Yes' : 'No';
   }
@@ -107,12 +106,11 @@ PAGE = """<!doctype html>
 </html>"""
 
 
-def prepare_videos(swing_torque, pulse_time, duration):
-    env = GolfEnvironment()
-    controller = DemoSwingController(swing_torque, pulse_time)
-    print(f"Demo swing torque: {swing_torque:+.2f} N m for {pulse_time:.2f} s "
-          f"starting at {DEMO_PULSE_START:.2f} s; active brake after contact")
-    renderer = mujoco.Renderer(env.model, height=480, width=640)
+def prepare_videos(matrix, duration):
+    env = GolfRLEnv(duration_s=duration)
+    policy = MatrixGolfPolicy(matrix)
+    state, _ = env.reset()
+    renderer = mujoco.Renderer(env.sim.model, height=480, width=640)
     samples = []
     next_frame = 0
     started = time.perf_counter()
@@ -121,30 +119,32 @@ def prepare_videos(swing_torque, pulse_time, duration):
         writers = {camera: imageio.get_writer(str(path), fps=FPS, codec="libx264",
                                               quality=8) for camera, path in paths.items()}
         try:
-            while env.data.time < duration:
-                observation = env.step(controller.command(env))
-                if env.data.time + 1e-9 < next_frame / FPS:
-                    continue
+            while True:
+                state, _, terminated, truncated, observation = env.step(
+                    policy.action(state)
+                )
                 for camera in CAMERAS:
-                    renderer.update_scene(env.data, camera=camera)
+                    renderer.update_scene(env.sim.data, camera=camera)
                     writers[camera].append_data(renderer.render())
                 samples.append(observation)
                 next_frame += 1
+                if terminated or truncated:
+                    break
         finally:
             for writer in writers.values():
                 writer.close()
             renderer.close()
         videos = {camera: path.read_bytes() for camera, path in paths.items()}
     print(f"Prepared {len(samples)} video frames in {time.perf_counter() - started:.1f}s")
-    result = env.observe()
+    result = env.sim.observe()
     print(f"Club hit: {result['ball_hit']}; final distance: "
-          f"{result['distance_to_hole_m']:.3f}m; sunk: {result['ball_sunk']}; "
-          f"wrist speed: {result['swing_speed_rad_s']:.4f}rad/s")
+          f"{result['distance_to_hole_m']:.3f}m; sunk: {result['ball_sunk']}")
+    env.close()
     return videos, samples
 
 
-def serve_demo(swing_torque, pulse_time, duration, host="127.0.0.1", port=8765):
-    videos, samples = prepare_videos(swing_torque, pulse_time, duration)
+def serve_demo(matrix, duration, host="127.0.0.1", port=8765):
+    videos, samples = prepare_videos(matrix, duration)
     metadata = json.dumps({"fps": FPS, "samples": samples}).encode("utf-8")
 
     class Handler(BaseHTTPRequestHandler):

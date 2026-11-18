@@ -1,4 +1,4 @@
-"""Run the two-joint golf task through the shared ProPS Gymnasium workflow.
+"""Run the six-joint golf task through the shared ProPS Gymnasium workflow.
 
 The older standalone rollout helpers remain importable for analysis, while
 the CLI uses the same YAML configuration, agent, and log layout as other ProPS
@@ -45,7 +45,7 @@ load_local_env()
 
 
 def rollout(matrix, env: GolfRLEnv, *, video_path: Path | None = None,
-            camera: str = "swing") -> dict:
+            camera: str = "overview") -> dict:
     """Run one deterministic episode from the universal reset pose."""
     if camera not in VIDEO_CAMERAS:
         raise ValueError(f"camera must be one of {VIDEO_CAMERAS}")
@@ -91,15 +91,22 @@ def rollout(matrix, env: GolfRLEnv, *, video_path: Path | None = None,
                     "ball_hit": info["ball_hit"],
                     "impact_offset_m": info["impact_offset_m"],
                     "impact_centrality": info["impact_centrality"],
+                    "launch_speed_m_s": info["launch_speed_m_s"],
+                    "launch_direction_quality": info["launch_direction_quality"],
                     "ball_sunk": info["ball_sunk"],
+                    "ball_settled": info["ball_settled"],
                     "ball_position_m": info["ball_position_m"],
-                    "position_angle_rad": info["position_angle_rad"],
-                    "position_error_rad": info["position_error_rad"],
-                    "position_speed_rad_s": info["position_speed_rad_s"],
-                    "wrist_angle_deg": info["wrist_angle_deg"],
-                    "wrist_speed_rad_s": info["swing_speed_rad_s"],
+                    "club_head_distance_to_ball_m": info["club_head_distance_to_ball_m"],
+                    "closest_club_head_distance_m": info["closest_club_head_distance_m"],
+                    "club_to_ball_vector_m": info["club_to_ball_vector_m"],
+                    "joint_angles_rad": info["joint_angles_rad"],
+                    "joint_speeds_rad_s": info["joint_speeds_rad_s"],
                     "collision_steps": info["collision_steps"],
                     "collision_contacts": info["collision_contacts"],
+                    "collision_events": info["collision_events"],
+                    "collision_time_s": info["collision_time_s"],
+                    "active_collision_pairs": info["active_collision_pairs"],
+                    "collision_pair_events": info["collision_pair_events"],
                     "time_s": info["time_s"],
                 }
                 if video_path is not None:
@@ -127,19 +134,28 @@ def propose_matrix(client, model: str, history: list[dict]) -> np.ndarray:
     best = max(history, key=lambda entry: entry["reward"])
     rows, columns = DEFAULT_MATRIX.shape
     system = (
-        "You optimize a numeric linear policy for a deterministic two-joint "
+        "You optimize a numeric linear policy for a deterministic six-joint "
         "MuJoCo golf task. This is regular ProPS: do not factorize the matrix. "
         f"Return only JSON {{'matrix': ...}} with exactly {rows} rows and "
         f"{columns} finite numbers per row. Action = state @ matrix, with "
-        "columns [joint4 positioning torque, joint5 swing torque], each clipped "
-        "to +/-28 N m. Every reset starts joint4 at the universal 0 rad pose; "
-        "the club face must be positioned near -pi/2 rad before joint5 can hit. "
-        "A useful policy therefore controls both columns, first positioning and "
-        "then swinging. Reward includes +20 for any hit, up to +30 for striking "
-        "the face center, up to +30 for low final cup distance, and +20 for a "
-        "sink. It subtracts action-slew (jerk proxy) and unwanted robot-contact "
-        "penalties. Prefer smooth feedback and moderate matrix changes. Use the "
-        "reported reward_components to diagnose each proposal."
+        "six columns ordered joint0 through joint5 torque. Joints 0-2 clip at "
+        "+/-150 N m and joints 3-5 at +/-28 N m. Every reset uses the same "
+        "neutral all-zero joint pose. No address pose, inverse kinematics, "
+        "chosen swing joint, or swing trajectory is provided. The rows contain "
+        "five generic episode-time bins, six model-dynamics values, six joint "
+        "angles, six joint speeds, and the XYZ club-face-to-ball displacement. "
+        "The 30-point strike reward is split into +10 contact, up to +10 "
+        "launch speed, and up to +10 launch direction toward the cup. Reward "
+        "also gives up to +40 for face-center impact, "
+        "up to +40 for low final cup distance, +30 for a sink, and only a very "
+        "small capped approach signal. It subtracts action slew, sustained "
+        "effort, and very large event/time-based penalties for every robot or "
+        "club collision other than the intended club-head/ball contact. The "
+        "rollout reports the exact colliding geometry pairs. Final distance is "
+        "measured after the ball settles when possible. The initial policy "
+        "only compensates dynamics and damps "
+        "velocity; discover positioning, face orientation, and swing behavior "
+        "by editing the complete matrix."
     )
     context = {
         "feature_names_in_row_order": FEATURE_NAMES,
@@ -198,7 +214,7 @@ def plot_reward_progress(history: list[dict], output_dir: Path,
     axis.scatter([episodes[best_index]], [rewards[best_index]], color="red",
                  s=80, zorder=5)
     axis.set(xlabel="ProPS episode", ylabel="Reward",
-             title="Two-joint golf reward progress")
+             title="Six-joint golf reward progress")
     axis.grid(True, alpha=0.3)
     axis.legend(loc="best")
     fig.tight_layout()
@@ -256,7 +272,7 @@ def _save_run_files(history: list[dict], output_dir: Path) -> None:
 def train(iterations: int, initial_matrix=DEFAULT_MATRIX, *, model: str | None = None,
           output_dir: Path | None = None, client=None, duration_s: float = 5.0,
           record_video: bool = False, record_best_video: bool = True,
-          camera: str = "swing", create_plots: bool = True) -> list[dict]:
+          camera: str = "overview", create_plots: bool = True) -> list[dict]:
     """Evaluate a baseline plus ``iterations`` LLM revisions."""
     if iterations < 0:
         raise ValueError("iterations must be nonnegative")
@@ -316,6 +332,7 @@ def train(iterations: int, initial_matrix=DEFAULT_MATRIX, *, model: str | None =
                 f"hit={result['ball_hit']} centrality={result['impact_centrality']:.3f} "
                 f"distance={result['distance_to_hole_m']:.3f}m "
                 f"jerk={components['smoothness_penalty']:.3f} "
+                f"effort={components['effort_penalty']:.3f} "
                 f"collision={components['collision_penalty']:.3f}", flush=True
             )
             if output_dir is not None:
@@ -336,7 +353,7 @@ def main() -> None:
     parser.add_argument("--iterations", "--episodes", type=int,
                         help="number of ProPS LLM training episodes (default: config value)")
     parser.add_argument("--matrix", type=Path,
-                        help="JSON file with an 11x2 'matrix' field for warmup")
+                        help="JSON file with a 26x6 'matrix' field for warmup")
     parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL"))
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()

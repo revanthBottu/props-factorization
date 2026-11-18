@@ -52,13 +52,13 @@ class GolfPropsIntegrationTests(unittest.TestCase):
             self.assertEqual(env.observation_space.shape, (config["dim_states"],))
             self.assertEqual(env.action_space.shape, (config["dim_actions"],))
         matrix = np.asarray(config["initial_matrix"], dtype=float)
-        self.assertEqual(matrix.shape, (11, 2))
+        self.assertEqual(matrix.shape, (26, 6))
 
         values = matrix.reshape(-1).copy()
         values[5] += 0.1  # ProPS rejects an exact repeat of the warmup matrix.
         reply = ", ".join(
             f"params[{index}]: {value}" for index, value in enumerate(values)
-        ) + "\nSlightly increase the first swing pulse."
+        ) + "\nExplore a small phase-zero joint5 torque."
 
         with tempfile.TemporaryDirectory() as folder:
             config["logdir"] = folder
@@ -83,7 +83,7 @@ class GolfPropsIntegrationTests(unittest.TestCase):
             prompt_log = (episode / "parameters_reasoning.txt").read_text()
             self.assertIn("MAX_STEPS (1)", prompt_log)
             self.assertIn("[-50.0, 50.0]", prompt_log)
-            self.assertIn("joint4 positioning torque", prompt_log)
+            self.assertIn("six action columns", prompt_log)
 
 
 if __name__ == "__main__":

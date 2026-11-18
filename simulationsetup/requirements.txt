@@ -6,3 +6,8 @@ imageio>=2.31
 imageio-ffmpeg>=0.4.9
 openai>=1.0
 python-dotenv>=1.0
+# Shared regular-ProPS runner used by run_golf_rl.py.
+PyYAML>=6.0
+Jinja2>=3.1
+seaborn>=0.13
+moviepy>=2.0

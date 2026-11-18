@@ -1,4 +1,4 @@
-"""MuJoCo golf simulation with independently controlled positioning and swing joints."""
+"""MuJoCo golf simulation with all six UR5 joints torque controlled."""
 
 from __future__ import annotations
 
@@ -12,9 +12,10 @@ import numpy as np
 
 SCENE = Path(__file__).resolve().parent / "golf_scene.xml"
 HOLE_XY = (1.045, 0.0)
-DEMO_PULSE_START = 0.55  # allow joint4 to position the club before joint5 swings
-CLUB_ADDRESS_ANGLE_RAD = -math.pi / 2
-ACTION_JOINT_NAMES = ("joint4", "joint5")
+BALL_RADIUS_M = 0.021335
+ACTION_JOINT_NAMES = tuple(f"joint{index}" for index in range(6))
+TARGET_DIRECTION_XY = np.array(HOLE_XY, dtype=np.float64)
+TARGET_DIRECTION_XY /= np.linalg.norm(TARGET_DIRECTION_XY)
 
 # Club-head dimensions used to normalize the first impact location. The
 # impact offset is measured in the face plane, from the face-center site.
@@ -24,12 +25,11 @@ MAX_FACE_OFFSET_M = math.hypot(HEAD_HALF_LENGTH_M, HEAD_HALF_HEIGHT_M)
 
 
 class GolfEnvironment:
-    """Accept two wrist torques and expose deterministic shot diagnostics.
+    """Accept six joint torques and expose deterministic shot diagnostics.
 
-    ``step((position_torque, swing_torque), substeps)`` advances MuJoCo. The
-    first four UR5 joints are fixed. Joint4 starts at a universal zero-angle
-    pose and must turn to ``CLUB_ADDRESS_ANGLE_RAD``; joint5 performs the
-    swing. Reset always restores the exact same robot and ball state.
+    Reset always restores the exact same neutral robot and ball state. No
+    target pose, swing joint, or valid-strike trajectory is built into the
+    environment; the policy controls every joint directly.
     """
 
     def __init__(self, scene_path=SCENE):
@@ -62,19 +62,28 @@ class GolfEnvironment:
         return descendants
 
     def reset(self):
-        address = self.model.key("address").id
-        mujoco.mj_resetDataKeyframe(self.model, self.data, address)
+        universal = self.model.key("universal").id
+        mujoco.mj_resetDataKeyframe(self.model, self.data, universal)
         mujoco.mj_forward(self.model, self.data)
         self.hit = False
         self.min_distance_m = float("inf")
+        self.min_club_head_distance_m = float("inf")
         self.impact_offset_m: float | None = None
         self.impact_centrality = 0.0
         self.collision_steps = 0
         self.collision_contacts = 0
+        self.collision_events = 0
+        self.collision_time_s = 0.0
+        self._active_collision_pairs: set[str] = set()
+        self.last_collision_pairs: tuple[str, ...] = ()
+        self.collision_pair_events: dict[str, int] = {}
+        self.max_ball_speed_m_s = 0.0
+        self.launch_direction_quality = 0.0
         return self.observe()
 
     def _record_contacts(self) -> None:
         unwanted_this_step = 0
+        unwanted_pairs: set[str] = set()
         for index in range(self.data.ncon):
             contact = self.data.contact[index]
             pair = {int(contact.geom1), int(contact.geom2)}
@@ -95,10 +104,39 @@ class GolfEnvironment:
                 self.hit = True
             elif pair & self.robot_geom_ids:
                 unwanted_this_step += 1
+                names = sorted(
+                    self.model.geom(geom_id).name or f"geom_{geom_id}"
+                    for geom_id in pair
+                )
+                unwanted_pairs.add(" <-> ".join(names))
 
-        if unwanted_this_step:
+        new_pairs = unwanted_pairs - self._active_collision_pairs
+        for pair_name in new_pairs:
+            self.collision_pair_events[pair_name] = (
+                self.collision_pair_events.get(pair_name, 0) + 1
+            )
+        self.collision_events += len(new_pairs)
+        self._active_collision_pairs = unwanted_pairs
+        self.last_collision_pairs = tuple(sorted(unwanted_pairs))
+        if unwanted_pairs:
             self.collision_steps += 1
             self.collision_contacts += unwanted_this_step
+            self.collision_time_s += float(self.model.opt.timestep)
+
+    def _update_ball_motion(self) -> None:
+        """Track the strongest horizontal launch produced after first impact."""
+        if not self.hit:
+            return
+        velocity_xy = np.asarray(
+            self.data.joint("ball_freejoint").qvel[:2], dtype=np.float64
+        )
+        speed = float(np.linalg.norm(velocity_xy))
+        if speed > self.max_ball_speed_m_s:
+            self.max_ball_speed_m_s = speed
+            self.launch_direction_quality = (
+                max(0.0, float(velocity_xy @ TARGET_DIRECTION_XY) / speed)
+                if speed > 1e-9 else 0.0
+            )
 
     def observe(self):
         ball = self.data.body("golf_ball").xpos
@@ -106,35 +144,54 @@ class GolfEnvironment:
         dy = float(ball[1]) - HOLE_XY[1]
         distance = math.hypot(dx, dy)
         self.min_distance_m = min(self.min_distance_m, distance)
-        position_angle = float(self.data.joint("joint4").qpos[0])
-        swing_angle = float(self.data.joint("joint5").qpos[0])
+        face = np.asarray(self.data.site("club_face_center").xpos)
+        club_to_ball = np.asarray(ball) - face
+        club_head_distance = max(
+            0.0, float(np.linalg.norm(club_to_ball)) - BALL_RADIUS_M
+        )
+        self.min_club_head_distance_m = min(
+            self.min_club_head_distance_m, club_head_distance
+        )
+        joint_angles = np.array([
+            float(self.data.joint(name).qpos[0]) for name in ACTION_JOINT_NAMES
+        ])
+        joint_speeds = np.array([
+            float(self.data.joint(name).qvel[0]) for name in ACTION_JOINT_NAMES
+        ])
+        ball_velocity = np.asarray(
+            self.data.joint("ball_freejoint").qvel[:3], dtype=np.float64
+        )
         return {
             "time_s": float(self.data.time),
             "ball_position_m": (float(ball[0]), float(ball[1]), float(ball[2])),
             "distance_to_hole_m": distance,
             "closest_distance_m": self.min_distance_m,
-            "position_angle_rad": position_angle,
-            "position_error_rad": CLUB_ADDRESS_ANGLE_RAD - position_angle,
-            "position_speed_rad_s": float(self.data.joint("joint4").qvel[0]),
-            "swing_angle_rad": swing_angle,
-            "wrist_angle_deg": math.degrees(swing_angle - math.pi),
-            "swing_speed_rad_s": float(self.data.joint("joint5").qvel[0]),
-            "position_torque_nm": float(self.data.ctrl[0]),
-            "motor_torque_nm": float(self.data.ctrl[1]),
+            "club_head_distance_to_ball_m": club_head_distance,
+            "closest_club_head_distance_m": self.min_club_head_distance_m,
+            "club_to_ball_vector_m": tuple(float(value) for value in club_to_ball),
+            "joint_angles_rad": tuple(float(value) for value in joint_angles),
+            "joint_speeds_rad_s": tuple(float(value) for value in joint_speeds),
             "action_torques_nm": tuple(float(value) for value in self.data.ctrl),
             "ball_hit": self.hit,
             "impact_offset_m": self.impact_offset_m,
             "impact_centrality": self.impact_centrality,
+            "ball_speed_m_s": float(np.linalg.norm(ball_velocity)),
+            "launch_speed_m_s": self.max_ball_speed_m_s,
+            "launch_direction_quality": self.launch_direction_quality,
             "collision_steps": self.collision_steps,
             "collision_contacts": self.collision_contacts,
+            "collision_events": self.collision_events,
+            "collision_time_s": self.collision_time_s,
+            "active_collision_pairs": self.last_collision_pairs,
+            "collision_pair_events": dict(self.collision_pair_events),
             "ball_sunk": distance < 0.045 and float(ball[2]) < -0.02,
         }
 
     def step(self, torques_nm: Sequence[float], substeps: int = 1):
         torques = np.asarray(torques_nm, dtype=np.float64)
-        if torques.shape != (2,) or not np.all(np.isfinite(torques)):
+        if torques.shape != (6,) or not np.all(np.isfinite(torques)):
             raise ValueError(
-                "torques_nm must contain finite (position, swing) torques"
+                "torques_nm must contain one finite torque for each of six joints"
             )
         if not isinstance(substeps, int) or substeps < 1:
             raise ValueError("substeps must be a positive integer")
@@ -142,5 +199,6 @@ class GolfEnvironment:
         for _ in range(substeps):
             mujoco.mj_step(self.model, self.data)
             self._record_contacts()
+            self._update_ball_motion()
             self.observe()
         return self.observe()

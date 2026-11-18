@@ -8,10 +8,16 @@ import time
 import gc
 from jinja2 import Template
 from dotenv import load_dotenv
-from google import genai
+try:
+    from google import genai
+except ImportError:
+    genai = None
 # import anthropic
 import time
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 
 try:
     from openai import OpenAI
@@ -129,6 +135,11 @@ class LLMBrain:
             )
             print(f"Using ASU model: {self.asu_model_name}")
         elif is_hf_model:
+            if torch is None:
+                raise ImportError(
+                    "PyTorch is required for HuggingFace models. "
+                    "Install with: pip install torch"
+                )
             if not HUGGINGFACE_AVAILABLE:
                 raise ImportError("HuggingFace transformers not installed. Install with: pip install transformers bitsandbytes accelerate")
             self.model_group = "huggingface"
@@ -310,6 +321,11 @@ class LLMBrain:
             )
             print(f"Using Groq model: {self.groq_model_name}")
         elif "gemini" in llm_model_name:
+            if genai is None:
+                raise ImportError(
+                    "Google GenAI is required for Gemini models. "
+                    "Install with: pip install google-genai"
+                )
             self.model_group = "gemini"
             # get env gemini keys into list
             self.gemini_api_keys = []
@@ -396,7 +412,7 @@ class LLMBrain:
         return str(getattr(self.hf_model, "device", "cpu"))
 
     def _clear_cuda_cache(self):
-        if torch.cuda.is_available():
+        if torch is not None and torch.cuda.is_available():
             torch.cuda.empty_cache()
             if hasattr(torch.cuda, "ipc_collect"):
                 torch.cuda.ipc_collect()

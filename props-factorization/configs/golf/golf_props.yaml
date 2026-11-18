@@ -1,0 +1,49 @@
+task: cont_space_llm_num_optim
+num_episodes: 250
+gym_env_name: envs.golf:GolfSwing-v0
+render_mode: null
+logdir: logs/golf_props_num_optim
+dim_actions: 2
+dim_states: 11
+max_traj_count: 1000
+max_traj_length: 250
+template_dir: agent/policy/templates
+llm_si_template_name: num_optim.j2
+llm_output_conversion_template_name: num_optim.j2
+llm_model_name: asu/gemma4-31b-it
+num_evaluation_episodes: 1
+warmup_episodes: 1
+warmup_dir: null
+bias: false
+optimum: 100
+search_step_size: 0.5
+parameter_min: -50.0
+parameter_max: 50.0
+parameter_decimals: 2
+task_context: >-
+  This is an 11-by-2 linear policy for a deterministic robot golf shot. The
+  two action columns are joint4 positioning torque and joint5 swing torque,
+  each clipped to +/-28 N m. Matrix weights are listed in row-major order.
+  Rows 0-1 are early positioning time windows; rows 2-4 are swing time
+  windows; rows 5-7 are joint4 gravity, target-angle error, and speed;
+  rows 8-10 are joint5 gravity, follow-through angle error, and speed after
+  the shot. Joint4 starts at 0 rad and must position the club near -pi/2 rad
+  before joint5 swings. A hit, central impact, cup proximity, and sinking
+  add reward; action changes and unwanted contacts subtract reward. Vary
+  swing timing and torque when changing positioning gains stops improving
+  the shot. Return the complete matrix, not factors.
+use_factorized_policy: false
+seed: 42
+# The first warmup rollout uses the working two-joint baseline.
+initial_matrix:
+  - [0, 0]
+  - [0, 0]
+  - [0, 1]
+  - [0, 0]
+  - [0, 0]
+  - [1, 0]
+  - [20, 0]
+  - [-6, 0]
+  - [0, 1]
+  - [0, 40]
+  - [0, -8]

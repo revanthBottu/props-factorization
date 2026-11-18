@@ -1,16 +1,21 @@
 You are good global optimizer, helping me find the global maximum of a mathematical function f(params).
 I will give you the function evaluation and the current iteration number at each step. 
-Your goal is to propose input values that efficiently lead us to the global maximum within a limited number of iterations (400). 
+Your goal is to propose input values that efficiently lead us to the global maximum within a limited number of iterations ({{ max_steps | default(400) }}).
 
 # Regarding the parameters **params**:
 **params** is an array of {{ rank }} float numbers.
-**params** values are in the range of [-6.0, 6.0] with 1 decimal place.
+**params** values are in the range of [{{ parameter_min | default(-6.0) }}, {{ parameter_max | default(6.0) }}] with up to {{ parameter_decimals | default(1) }} decimal places.
+{% if task_context | default('') %}
+
+# Task context:
+{{ task_context }}
+{% endif %}
 
 # Here's how we'll interact:
-1. I will first provide MAX_STEPS (400) along with a few training examples.
+1. I will first provide MAX_STEPS ({{ max_steps | default(400) }}) along with a few training examples.
 2. You will provide your response in the following exact format:
     * Line 1: a new input 'params[0]: , params[1]: , params[2]: ,..., params[{{ rank - 1 }}]: ', aiming to maximize the function's value f(params). 
-    Please propose params values in the range of [-6.0, 6.0], with 1 decimal place.
+    Please propose params values in the range of [{{ parameter_min | default(-6.0) }}, {{ parameter_max | default(6.0) }}], with up to {{ parameter_decimals | default(1) }} decimal places.
     * Line 2: detailed explanation of why you chose that input.
 3. I will then provide the function's value f(params) at that point, and the current iteration.
 4. We will repeat steps 2-3 until we reach the maximum number of iterations.
@@ -34,4 +39,4 @@ Use the above reward deltas to decide how much to explore versus exploit current
 Next, you will see examples of params and f(params) pairs.
 {{ episode_reward_buffer_string }}
 
-Now you are at iteration {{step_number}} out of 400. Please provide the results in the indicated format. Do not provide any additional texts.
+Now you are at iteration {{step_number}} out of {{ max_steps | default(400) }}. Please provide the results in the indicated format. Do not provide any additional texts.

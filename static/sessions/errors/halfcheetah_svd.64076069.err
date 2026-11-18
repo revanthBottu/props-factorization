@@ -1,0 +1,237 @@
+=====================================================================
+Loaded: mamba 2.6.2
+
+Usage example:
+$ mamba create -n myenv -c conda-forge python=3 <package_name>
+$ source activate myenv
+
+Only run "pip install" after activating an environment.
+Running pip without activating an environment is known to cause issues.
+
+To list available environments:
+$ mamba info --envs
+
+More info: docs.rc.asu.edu/python
+
+=====================================================================
+     
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 601, in query_llm
+    response = self.ollama_client.chat(
+        model=self.ollama_model_name,
+        messages=self.llm_conversation
+    )
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 365, in chat
+    return self._request(
+           ~~~~~~~~~~~~~^
+      ChatResponse,
+      ^^^^^^^^^^^^^
+    ...<14 lines>...
+      stream=stream,
+      ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 189, in _request
+    return cls(**self._request_raw(*args, **kwargs).json())
+                 ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 133, in _request_raw
+    raise ResponseError(e.response.text, e.response.status_code) from None
+ollama._types.ResponseError: model 'gpt-oss:120b' not found (status code: 404)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2103, in train_policy
+    candidate_components, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_factor_examples(self.replay_buffer),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<14 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1142, in llm_update_parameters_num_optim
+    new_parameters_with_reasoning = self.query_llm()
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 623, in query_llm
+    raise Exception("Failed to get response from LLM after 10 attempts")
+Exception: Failed to get response from LLM after 10 attempts
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 601, in query_llm
+    response = self.ollama_client.chat(
+        model=self.ollama_model_name,
+        messages=self.llm_conversation
+    )
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 365, in chat
+    return self._request(
+           ~~~~~~~~~~~~~^
+      ChatResponse,
+      ^^^^^^^^^^^^^
+    ...<14 lines>...
+      stream=stream,
+      ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 189, in _request
+    return cls(**self._request_raw(*args, **kwargs).json())
+                 ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 133, in _request_raw
+    raise ResponseError(e.response.text, e.response.status_code) from None
+ollama._types.ResponseError: model 'gpt-oss:120b' not found (status code: 404)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2103, in train_policy
+    candidate_components, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_factor_examples(self.replay_buffer),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<14 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1142, in llm_update_parameters_num_optim
+    new_parameters_with_reasoning = self.query_llm()
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 623, in query_llm
+    raise Exception("Failed to get response from LLM after 10 attempts")
+Exception: Failed to get response from LLM after 10 attempts
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 601, in query_llm
+    response = self.ollama_client.chat(
+        model=self.ollama_model_name,
+        messages=self.llm_conversation
+    )
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 365, in chat
+    return self._request(
+           ~~~~~~~~~~~~~^
+      ChatResponse,
+      ^^^^^^^^^^^^^
+    ...<14 lines>...
+      stream=stream,
+      ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 189, in _request
+    return cls(**self._request_raw(*args, **kwargs).json())
+                 ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 133, in _request_raw
+    raise ResponseError(e.response.text, e.response.status_code) from None
+ollama._types.ResponseError: model 'gpt-oss:120b' not found (status code: 404)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2103, in train_policy
+    candidate_components, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_factor_examples(self.replay_buffer),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<14 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1142, in llm_update_parameters_num_optim
+    new_parameters_with_reasoning = self.query_llm()
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 623, in query_llm
+    raise Exception("Failed to get response from LLM after 10 attempts")
+Exception: Failed to get response from LLM after 10 attempts
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 601, in query_llm
+    response = self.ollama_client.chat(
+        model=self.ollama_model_name,
+        messages=self.llm_conversation
+    )
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 365, in chat
+    return self._request(
+           ~~~~~~~~~~~~~^
+      ChatResponse,
+      ^^^^^^^^^^^^^
+    ...<14 lines>...
+      stream=stream,
+      ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 189, in _request
+    return cls(**self._request_raw(*args, **kwargs).json())
+                 ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 133, in _request_raw
+    raise ResponseError(e.response.text, e.response.status_code) from None
+ollama._types.ResponseError: model 'gpt-oss:120b' not found (status code: 404)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2103, in train_policy
+    candidate_components, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_factor_examples(self.replay_buffer),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<14 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1142, in llm_update_parameters_num_optim
+    new_parameters_with_reasoning = self.query_llm()
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 623, in query_llm
+    raise Exception("Failed to get response from LLM after 10 attempts")
+Exception: Failed to get response from LLM after 10 attempts
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 601, in query_llm
+    response = self.ollama_client.chat(
+        model=self.ollama_model_name,
+        messages=self.llm_conversation
+    )
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 365, in chat
+    return self._request(
+           ~~~~~~~~~~~~~^
+      ChatResponse,
+      ^^^^^^^^^^^^^
+    ...<14 lines>...
+      stream=stream,
+      ^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 189, in _request
+    return cls(**self._request_raw(*args, **kwargs).json())
+                 ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/ollama/_client.py", line 133, in _request_raw
+    raise ResponseError(e.response.text, e.response.status_code) from None
+ollama._types.ResponseError: model 'gpt-oss:120b' not found (status code: 404)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2103, in train_policy
+    candidate_components, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_factor_examples(self.replay_buffer),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<14 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1142, in llm_update_parameters_num_optim
+    new_parameters_with_reasoning = self.query_llm()
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 623, in query_llm
+    raise Exception("Failed to get response from LLM after 10 attempts")
+Exception: Failed to get response from LLM after 10 attempts

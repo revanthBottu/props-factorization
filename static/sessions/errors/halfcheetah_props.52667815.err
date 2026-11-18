@@ -1,0 +1,517 @@
+
+=====================================================================
+This module is only for creating or activating Python environments:
+$ mamba create -n myenv -c conda-forge python=3 <package_name>
+$ source activate myenv
+
+Only run "pip install" after activating an environment.
+Running pip without activating an environment is known to cause issues.
+
+To list available environments:
+$ mamba info --envs
+
+Other uses are not tested. More info: https://links.asu.edu/solpy
+=====================================================================
+
+  
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_test1/episode_0/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_test1/episode_1/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_test1/episode_4/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_test1/episode_6/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_test1/episode_7/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_test1/episode_58/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_test1/episode_63/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_test1/episode_71/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+    candidate_parameters, candidate_reasoning, api_time = self.llm_brain.llm_update_parameters_num_optim(
+                                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        str_nd_examples(self.replay_buffer, self.rank),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        reward_context=reward_delta_context,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    assert len(results) == self.rank
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+        reasoning = candidate_reasoning
+    
+    ...<7 lines>...
+    
+    
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    try:
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+        reasoning = candidate_reasoning
+    
+    ...<7 lines>...
+    
+    
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    try:
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+        reasoning = candidate_reasoning
+    
+    ...<7 lines>...
+    
+    
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    try:
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+        reasoning = candidate_reasoning
+    
+    ...<7 lines>...
+    
+    
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    try:
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+        reasoning = candidate_reasoning
+    
+    ...<7 lines>...
+    
+    
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    try:
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+        reasoning = candidate_reasoning
+    
+    ...<7 lines>...
+    
+    
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    try:
+AssertionError
+Traceback (most recent call last):
+  File "/home/sbottu/props-factor/props-llm-1/runner/llm_num_optim_runner.py", line 207, in run_training_loop
+    cpu_time, api_time, total_episodes, total_steps, total_reward, variance, std, phase = agent.train_policy(world, curr_episode_dir)
+                                                                                          ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 2156, in train_policy
+        reasoning = candidate_reasoning
+    
+    ...<7 lines>...
+    
+    
+  File "/home/sbottu/props-factor/props-llm-1/agent/policy/llm_brain_linear_policy.py", line 1153, in llm_update_parameters_num_optim
+    new_parameters_list = parse_parameters(new_parameters_with_reasoning)
+  File "/home/sbottu/props-factor/props-llm-1/agent/llm_num_optim_linear_policy.py", line 1406, in parse_parameters
+    try:
+AssertionError

@@ -55,6 +55,7 @@ class LLMBrain:
         self.hf_input_device = "cpu"
         
         llm_model_name_lower = llm_model_name.lower()
+        is_asu_model = llm_model_name_lower.startswith("asu/")
 
         # Detect explicit provider prefixes before generic slash-based routing.
         is_ollama_prefixed = llm_model_name_lower.startswith("ollama/")
@@ -76,11 +77,11 @@ class LLMBrain:
         # Detect if this is a HuggingFace model (contains / indicating org/model format)
         # HuggingFace paths: "Qwen/Qwen3.5-72B-Instruct", "meta-llama/Llama-3.1-70B", etc.
         # Exclude Groq and explicit Ollama provider-prefixed models.
-        is_hf_model = (not is_groq_model) and (not is_ollama_prefixed) and ("/" in llm_model_name)
+        is_hf_model = (not is_groq_model) and (not is_ollama_prefixed) and (not is_asu_model) and ("/" in llm_model_name)
         
         # Detect if this is an Ollama model (model:version format or common local model names)
         # Ollama examples: "llama3:70b", "qwen:14b", "mistral:latest"
-        is_ollama_model = is_ollama_prefixed or ((not is_hf_model and not is_groq_model) and (
+        is_ollama_model = is_ollama_prefixed or ((not is_hf_model and not is_groq_model and not is_asu_model) and (
             ":" in llm_model_name
             or any(
                 llm_model_name_lower.startswith(prefix)
@@ -106,7 +107,7 @@ class LLMBrain:
             "claude-3-7-sonnet-20250219",
         ]
         
-        if not is_hf_model and not is_ollama_model and not is_groq_model:
+        if not is_hf_model and not is_ollama_model and not is_groq_model and not is_asu_model:
             assert llm_model_name in known_models, (
                 f"Unknown model: {llm_model_name}. Use a known model, an Ollama model, a Groq model, or a HuggingFace model."
             )
@@ -114,7 +115,20 @@ class LLMBrain:
         self.llm_model_name = llm_model_name
         
         # Setup model group and client
-        if is_hf_model:
+        if is_asu_model:
+            if not OPENAI_CLIENT_AVAILABLE:
+                raise ImportError("openai package not installed. Install with: pip install openai")
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError("Missing OPENAI_API_KEY for the ASU model.")
+            self.model_group = "asu"
+            self.asu_model_name = llm_model_name.split("/", 1)[1]
+            self.asu_client = OpenAI(
+                api_key=api_key,
+                base_url=os.environ.get("OPENAI_BASE_URL", "https://openai.rc.asu.edu/v1"),
+            )
+            print(f"Using ASU model: {self.asu_model_name}")
+        elif is_hf_model:
             if not HUGGINGFACE_AVAILABLE:
                 raise ImportError("HuggingFace transformers not installed. Install with: pip install transformers bitsandbytes accelerate")
             self.model_group = "huggingface"
@@ -565,6 +579,8 @@ class LLMBrain:
             self.llm_conversation.append({"role": role, "content": text})
         elif self.model_group == "groq":
             self.llm_conversation.append({"role": role, "content": text})
+        elif self.model_group == "asu":
+            self.llm_conversation.append({"role": role, "content": text})
 
     def query_llm(self):
         for attempt in range(10):
@@ -606,6 +622,12 @@ class LLMBrain:
                 elif self.model_group == "groq":
                     completion = self.groq_client.chat.completions.create(
                         model=self.groq_model_name,
+                        messages=self.llm_conversation,
+                    )
+                    response = completion.choices[0].message.content or ""
+                elif self.model_group == "asu":
+                    completion = self.asu_client.chat.completions.create(
+                        model=self.asu_model_name,
                         messages=self.llm_conversation,
                     )
                     response = completion.choices[0].message.content or ""
@@ -695,6 +717,15 @@ class LLMBrain:
                     for _ in range(num_responses):
                         completion = self.groq_client.chat.completions.create(
                             model=self.groq_model_name,
+                            messages=self.llm_conversation,
+                            temperature=temperature,
+                        )
+                        responses.append(completion.choices[0].message.content or "")
+                elif self.model_group == "asu":
+                    responses = []
+                    for _ in range(num_responses):
+                        completion = self.asu_client.chat.completions.create(
+                            model=self.asu_model_name,
                             messages=self.llm_conversation,
                             temperature=temperature,
                         )

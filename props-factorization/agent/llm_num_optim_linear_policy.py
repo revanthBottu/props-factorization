@@ -1346,14 +1346,22 @@ class LLMNumOptimAgent:
             except Exception:
                 pass
 
-    def random_warmup(self, world: BaseWorld, logdir, num_episodes):
+    def random_warmup(self, world: BaseWorld, logdir, num_episodes,
+                      initial_matrix=None):
         for episode in range(num_episodes):
-            self.policy.initialize_policy()
+            if episode == 0 and initial_matrix is not None:
+                candidate = np.asarray(initial_matrix, dtype=float)
+                expected = (self.dim_state, self.dim_action)
+                if candidate.shape != expected or not np.all(np.isfinite(candidate)):
+                    raise ValueError(f"initial_matrix must be a finite {expected} matrix")
+                self.policy.update_policy(candidate)
+            else:
+                self.policy.initialize_policy()
             # Run the episode and collect the trajectory
             print(f"Rolling out warmup episode {episode}...")
             logging_filename = f"{logdir}/warmup_rollout_{episode}.txt"
-            logging_file = open(logging_filename, "w", encoding="utf-8")
-            result = self.rollout_episode(world, logging_file)
+            with open(logging_filename, "w", encoding="utf-8") as logging_file:
+                result = self.rollout_episode(world, logging_file)
             print(f"Result: {result}")
             
             # Track warmup rewards
@@ -2261,14 +2269,11 @@ class LLMNumOptimAgent:
         # Run the episode and collect the trajectory
         print(f"Rolling out episode {self.training_episodes}...")
         logging_filename = f"{logdir}/training_rollout.txt"
-        logging_file = open(logging_filename, "w", encoding="utf-8")
         results = []
-        for idx in range(self.num_evaluation_episodes):
-            if idx == 0:
+        with open(logging_filename, "w", encoding="utf-8") as logging_file:
+            for idx in range(self.num_evaluation_episodes):
                 result = self.rollout_episode(world, logging_file, record=False)
-            else:
-                result = self.rollout_episode(world, logging_file, record=False)
-            results.append(result)
+                results.append(result)
         print(f"Results: {results}")
         result = self._clip_reward(np.mean(results))
         variance = np.var(results)

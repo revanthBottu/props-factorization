@@ -1,0 +1,28 @@
+
+=====================================================================
+This module is only for creating or activating Python environments:
+$ mamba create -n myenv -c conda-forge python=3 <package_name>
+$ source activate myenv
+
+Only run "pip install" after activating an environment.
+Running pip without activating an environment is known to cause issues.
+
+To list available environments:
+$ mamba info --envs
+
+Other uses are not tested. More info: https://links.asu.edu/solpy
+=====================================================================
+
+  
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_svd_rawpreset_test2/episode_0/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_svd_rawpreset_test2/episode_1/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_svd_rawpreset_test2/episode_7/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_svd_rawpreset_test2/episode_8/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_svd_rawpreset_test2/episode_17/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(
+/home/sbottu/.conda/envs/props-factor/lib/python3.13/site-packages/gymnasium/wrappers/rendering.py:293: UserWarning: [33mWARN: Overwriting existing videos at /home/sbottu/props-factor/props-llm-1/logs/halfcheetah_props_svd_rawpreset_test2/episode_177/best_videos folder (try specifying a different `video_folder` for the `RecordVideo` wrapper if this is not desired)[0m
+  logger.warn(

@@ -66,10 +66,26 @@ def run_training_loop(
     elite_buffer_size=5,
     reward_clip_floor=None,
     seed=None,
+    initial_matrix=None,
+    parameter_min=-6.0,
+    parameter_max=6.0,
+    parameter_decimals=1,
+    task_context="",
 ):
     assert task in ["cont_space_llm_num_optim", "cont_space_llm_num_optim_rndm_proj", "dist_state_llm_num_optim"]
 
     jinja2_env = Environment(loader=FileSystemLoader(template_dir))
+    if parameter_min >= parameter_max:
+        raise ValueError("parameter_min must be less than parameter_max")
+    if parameter_decimals < 0:
+        raise ValueError("parameter_decimals must be nonnegative")
+    jinja2_env.globals.update(
+        max_steps=num_episodes,
+        parameter_min=parameter_min,
+        parameter_max=parameter_max,
+        parameter_decimals=parameter_decimals,
+        task_context=task_context,
+    )
     llm_si_template = jinja2_env.get_template(llm_si_template_name)
     llm_output_conversion_template = jinja2_env.get_template(
         llm_output_conversion_template_name
@@ -188,7 +204,17 @@ def run_training_loop(
     if not warmup_dir:
         warmup_dir = f"{logdir}/warmup"
         os.makedirs(warmup_dir, exist_ok=True)
-        agent.random_warmup(world, warmup_dir, warmup_episodes)
+        if initial_matrix is not None and task != "cont_space_llm_num_optim":
+            raise ValueError("initial_matrix requires a continuous linear policy")
+        if initial_matrix is not None and warmup_episodes < 1:
+            raise ValueError("initial_matrix requires at least one warmup episode")
+        if task == "cont_space_llm_num_optim":
+            agent.random_warmup(
+                world, warmup_dir, warmup_episodes,
+                initial_matrix=initial_matrix,
+            )
+        else:
+            agent.random_warmup(world, warmup_dir, warmup_episodes)
     else:
         agent.replay_buffer.load(warmup_dir)
     

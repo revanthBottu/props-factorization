@@ -1,0 +1,593 @@
+time=2026-05-12T08:36:07.676-07:00 level=INFO source=routes.go:1727 msg="server config" env="map[CUDA_VISIBLE_DEVICES:0 GGML_VK_VISIBLE_DEVICES: GPU_DEVICE_ORDINAL:0 HIP_VISIBLE_DEVICES: HSA_OVERRIDE_GFX_VERSION: HTTPS_PROXY: HTTP_PROXY: NO_PROXY: OLLAMA_CONTEXT_LENGTH:0 OLLAMA_DEBUG:INFO OLLAMA_EDITOR: OLLAMA_FLASH_ATTENTION:false OLLAMA_GPU_OVERHEAD:0 OLLAMA_HOST:http://127.0.0.1:11434 OLLAMA_KEEP_ALIVE:5m0s OLLAMA_KV_CACHE_TYPE: OLLAMA_LLM_LIBRARY: OLLAMA_LOAD_TIMEOUT:5m0s OLLAMA_MAX_LOADED_MODELS:0 OLLAMA_MAX_QUEUE:512 OLLAMA_MODELS:/scratch/sbottu/ollama_models OLLAMA_MULTIUSER_CACHE:false OLLAMA_NEW_ENGINE:false OLLAMA_NOHISTORY:false OLLAMA_NOPRUNE:false OLLAMA_NO_CLOUD:false OLLAMA_NUM_PARALLEL:1 OLLAMA_ORIGINS:[http://localhost https://localhost http://localhost:* https://localhost:* http://127.0.0.1 https://127.0.0.1 http://127.0.0.1:* https://127.0.0.1:* http://0.0.0.0 https://0.0.0.0 http://0.0.0.0:* https://0.0.0.0:* app://* file://* tauri://* vscode-webview://* vscode-file://*] OLLAMA_REMOTES:[ollama.com] OLLAMA_SCHED_SPREAD:false OLLAMA_VULKAN:false ROCR_VISIBLE_DEVICES:0 http_proxy: https_proxy: no_proxy:]"
+time=2026-05-12T08:36:07.677-07:00 level=INFO source=routes.go:1729 msg="Ollama cloud disabled: false"
+time=2026-05-12T08:36:07.683-07:00 level=INFO source=images.go:477 msg="total blobs: 5"
+time=2026-05-12T08:36:07.685-07:00 level=INFO source=images.go:484 msg="total unused blobs removed: 0"
+time=2026-05-12T08:36:07.687-07:00 level=INFO source=routes.go:1782 msg="Listening on 127.0.0.1:11434 (version 0.18.2)"
+time=2026-05-12T08:36:07.812-07:00 level=INFO source=runner.go:67 msg="discovering available GPUs..."
+time=2026-05-12T08:36:07.812-07:00 level=WARN source=runner.go:485 msg="user overrode visible devices" CUDA_VISIBLE_DEVICES=0
+time=2026-05-12T08:36:07.812-07:00 level=WARN source=runner.go:485 msg="user overrode visible devices" ROCR_VISIBLE_DEVICES=0
+time=2026-05-12T08:36:07.812-07:00 level=WARN source=runner.go:485 msg="user overrode visible devices" GPU_DEVICE_ORDINAL=0
+time=2026-05-12T08:36:07.812-07:00 level=WARN source=runner.go:489 msg="if GPUs are not correctly discovered, unset and try again"
+time=2026-05-12T08:36:07.823-07:00 level=INFO source=server.go:430 msg="starting runner" cmd="/scratch/sbottu/ollama/v0.18.2/bin/ollama runner --ollama-engine --port 46449"
+time=2026-05-12T08:36:12.422-07:00 level=INFO source=server.go:430 msg="starting runner" cmd="/scratch/sbottu/ollama/v0.18.2/bin/ollama runner --ollama-engine --port 46477"
+time=2026-05-12T08:36:15.999-07:00 level=INFO source=runner.go:106 msg="experimental Vulkan support disabled.  To enable, set OLLAMA_VULKAN=1"
+time=2026-05-12T08:36:16.001-07:00 level=INFO source=server.go:430 msg="starting runner" cmd="/scratch/sbottu/ollama/v0.18.2/bin/ollama runner --ollama-engine --port 38193"
+time=2026-05-12T08:36:16.001-07:00 level=INFO source=server.go:430 msg="starting runner" cmd="/scratch/sbottu/ollama/v0.18.2/bin/ollama runner --ollama-engine --port 42029"
+time=2026-05-12T08:36:16.900-07:00 level=INFO source=types.go:42 msg="inference compute" id=GPU-89aa45e7-abb5-ff14-0a11-ffc96bc993a0 filter_id="" library=CUDA compute=8.0 name=CUDA0 description="NVIDIA A100-SXM4-80GB" libdirs=ollama,cuda_v13 driver=13.0 pci_id=0000:41:00.0 type=discrete total="80.0 GiB" available="79.2 GiB"
+time=2026-05-12T08:36:16.900-07:00 level=INFO source=routes.go:1832 msg="vram-based default context" total_vram="80.0 GiB" default_num_ctx=262144
+[GIN] 2026/05/12 - 08:36:16 | 200 |    3.876275ms |       127.0.0.1 | GET      "/api/tags"
+time=2026-05-12T08:37:38.768-07:00 level=INFO source=server.go:430 msg="starting runner" cmd="/scratch/sbottu/ollama/v0.18.2/bin/ollama runner --ollama-engine --port 46257"
+time=2026-05-12T08:37:39.688-07:00 level=WARN source=server.go:168 msg="requested context size too large for model" num_ctx=262144 n_ctx_train=131072
+time=2026-05-12T08:37:39.688-07:00 level=INFO source=server.go:246 msg="enabling flash attention"
+time=2026-05-12T08:37:39.689-07:00 level=INFO source=server.go:430 msg="starting runner" cmd="/scratch/sbottu/ollama/v0.18.2/bin/ollama runner --ollama-engine --model /scratch/sbottu/ollama_models/blobs/sha256-6be6d66a3f546d8c19b130dc41dc24b2fc159f84ffbc76a0ee0676205083cf5a --port 34545"
+time=2026-05-12T08:37:39.794-07:00 level=INFO source=sched.go:484 msg="system memory" total="503.5 GiB" free="463.6 GiB" free_swap="0 B"
+time=2026-05-12T08:37:39.795-07:00 level=INFO source=sched.go:491 msg="gpu memory" id=GPU-89aa45e7-abb5-ff14-0a11-ffc96bc993a0 library=CUDA available="78.8 GiB" free="79.2 GiB" minimum="457.0 MiB" overhead="0 B"
+time=2026-05-12T08:37:39.795-07:00 level=INFO source=server.go:757 msg="loading model" "model layers"=37 requested=-1
+time=2026-05-12T08:37:39.949-07:00 level=INFO source=runner.go:1411 msg="starting ollama engine"
+time=2026-05-12T08:37:39.950-07:00 level=INFO source=runner.go:1446 msg="Server listening on 127.0.0.1:34545"
+time=2026-05-12T08:37:39.954-07:00 level=INFO source=runner.go:1284 msg=load request="{Operation:fit LoraPath:[] Parallel:1 BatchSize:512 FlashAttention:Enabled KvSize:131072 KvCacheType: NumThreads:48 GPULayers:37[ID:GPU-89aa45e7-abb5-ff14-0a11-ffc96bc993a0 Layers:37(0..36)] MultiUserCache:false ProjectorPath: MainGPU:0 UseMmap:false}"
+time=2026-05-12T08:37:40.034-07:00 level=INFO source=ggml.go:136 msg="" architecture=gptoss file_type=MXFP4 name="" description="" num_tensors=687 num_key_values=32
+load_backend: loaded CPU backend from /scratch/sbottu/ollama/v0.18.2/lib/ollama/libggml-cpu-haswell.so
+ggml_cuda_init: GGML_CUDA_FORCE_MMQ:    no
+ggml_cuda_init: GGML_CUDA_FORCE_CUBLAS: no
+ggml_cuda_init: found 1 CUDA devices:
+  Device 0: NVIDIA A100-SXM4-80GB, compute capability 8.0, VMM: yes, ID: GPU-89aa45e7-abb5-ff14-0a11-ffc96bc993a0
+load_backend: loaded CUDA backend from /scratch/sbottu/ollama/v0.18.2/lib/ollama/cuda_v13/libggml-cuda.so
+time=2026-05-12T08:37:40.436-07:00 level=INFO source=ggml.go:104 msg=system CPU.0.SSE3=1 CPU.0.SSSE3=1 CPU.0.AVX=1 CPU.0.AVX2=1 CPU.0.F16C=1 CPU.0.FMA=1 CPU.0.BMI2=1 CPU.0.LLAMAFILE=1 CPU.1.LLAMAFILE=1 CUDA.0.ARCHS=750,800,860,870,890,900,1000,1030,1100,1200,1210 CUDA.0.USE_GRAPHS=1 CUDA.0.PEER_MAX_BATCH_SIZE=128 compiler=cgo(gcc)
+time=2026-05-12T08:37:44.641-07:00 level=INFO source=runner.go:1284 msg=load request="{Operation:alloc LoraPath:[] Parallel:1 BatchSize:512 FlashAttention:Enabled KvSize:131072 KvCacheType: NumThreads:48 GPULayers:37[ID:GPU-89aa45e7-abb5-ff14-0a11-ffc96bc993a0 Layers:37(0..36)] MultiUserCache:false ProjectorPath: MainGPU:0 UseMmap:false}"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=runner.go:1284 msg=load request="{Operation:commit LoraPath:[] Parallel:1 BatchSize:512 FlashAttention:Enabled KvSize:131072 KvCacheType: NumThreads:48 GPULayers:37[ID:GPU-89aa45e7-abb5-ff14-0a11-ffc96bc993a0 Layers:37(0..36)] MultiUserCache:false ProjectorPath: MainGPU:0 UseMmap:false}"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=device.go:240 msg="model weights" device=CUDA0 size="59.8 GiB"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=device.go:245 msg="model weights" device=CPU size="1.1 GiB"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=device.go:251 msg="kv cache" device=CUDA0 size="4.7 GiB"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=device.go:262 msg="compute graph" device=CUDA0 size="487.1 MiB"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=device.go:267 msg="compute graph" device=CPU size="5.6 MiB"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=device.go:272 msg="total memory" size="66.0 GiB"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=ggml.go:482 msg="offloading 36 repeating layers to GPU"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=ggml.go:489 msg="offloading output layer to GPU"
+time=2026-05-12T08:37:45.282-07:00 level=INFO source=ggml.go:494 msg="offloaded 37/37 layers to GPU"
+time=2026-05-12T08:37:45.283-07:00 level=INFO source=sched.go:561 msg="loaded runners" count=1
+time=2026-05-12T08:37:45.283-07:00 level=INFO source=server.go:1350 msg="waiting for llama runner to start responding"
+time=2026-05-12T08:37:45.285-07:00 level=INFO source=server.go:1384 msg="waiting for server to become available" status="llm server loading model"
+time=2026-05-12T08:38:18.117-07:00 level=INFO source=server.go:1388 msg="llama runner started in 38.33 seconds"
+[GIN] 2026/05/12 - 08:38:45 | 200 |          1m7s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:39:40 | 200 | 29.279064134s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:40:21 | 200 | 30.182124373s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:41:03 | 200 | 27.784500755s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:41:45 | 200 | 29.033222889s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:42:20 | 200 | 31.052115718s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:42:55 | 200 | 31.694968923s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:43:33 | 200 | 34.531219168s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:44:10 | 200 | 33.118406916s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:44:49 | 200 | 35.177041994s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:45:28 | 200 | 34.687816049s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:46:08 | 200 | 36.122750965s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:46:32 | 200 |   31.571637ms |       127.0.0.1 | GET      "/api/tags"
+[GIN] 2026/05/12 - 08:46:47 | 200 | 36.012278864s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:47:36 | 200 | 45.310374049s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:47:57 | 200 | 45.087242443s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:48:47 | 200 |          1m7s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:49:17 | 200 | 58.026026293s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:50:00 | 200 |          1m8s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:50:25 | 200 | 55.300790899s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:51:04 | 200 |          1m0s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:51:23 | 200 | 53.415208737s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:52:05 | 200 | 56.988353289s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:52:50 | 200 |         1m21s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:53:29 | 200 |         1m20s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:54:01 | 200 |          1m5s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:54:43 | 200 |         1m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:55:06 | 200 | 59.761214602s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:55:46 | 200 |          1m0s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:56:24 | 200 |         1m13s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:57:11 | 200 |         1m21s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:57:33 | 200 |          1m3s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:58:25 | 200 |         1m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:58:49 | 200 |         1m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 08:59:46 | 200 |         1m17s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:00:23 | 200 |         1m29s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:01:13 | 200 |         1m22s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:01:42 | 200 |         1m13s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:02:52 | 200 |         1m35s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:03:20 | 200 |         1m32s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:04:39 | 200 |         1m43s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:05:12 | 200 |         1m47s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:06:07 | 200 |         1m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:06:58 | 200 |         1m40s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:08:01 | 200 |         1m50s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:08:37 | 200 |         1m34s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:09:31 | 200 |         1m26s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:10:30 | 200 |         1m48s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:11:18 | 200 |         1m44s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:12:20 | 200 |         1m44s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:13:09 | 200 |         1m47s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:13:36 | 200 |         1m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:14:29 | 200 |         1m15s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:15:45 | 200 |          2m3s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:16:40 | 200 |          2m7s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:17:47 | 200 |         1m57s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:18:44 | 200 |          2m0s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:19:10 | 200 |         1m17s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:20:12 | 200 |         1m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:20:54 | 200 |         1m39s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:21:51 | 200 |         1m35s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:22:23 | 200 |         1m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:23:51 | 200 |         1m56s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:24:30 | 200 |          2m2s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:25:24 | 200 |         1m28s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:26:37 | 200 |          2m1s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:27:38 | 200 |         2m11s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:28:24 | 200 |         1m42s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:29:26 | 200 |         1m43s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:30:10 | 200 |         1m32s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:31:07 | 200 |         1m38s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:31:33 | 200 |         1m17s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:32:30 | 200 |         1m19s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:33:07 | 200 |         1m29s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:34:05 | 200 |         1m31s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:35:12 | 200 |         1m59s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:36:11 | 200 |          2m1s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:37:01 | 200 |         1m44s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:38:02 | 200 |         1m47s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:38:30 | 200 |         1m24s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:39:31 | 200 |         1m24s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:40:13 | 200 |         1m37s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:41:18 | 200 |         1m42s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:41:59 | 200 |         1m41s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:43:00 | 200 |         1m38s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:43:22 | 200 |         1m17s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:44:26 | 200 |         1m22s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:45:05 | 200 |         1m37s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:46:09 | 200 |         1m39s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:46:57 | 200 |         1m47s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:48:04 | 200 |         1m52s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:49:02 | 200 |         1m59s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:50:07 | 200 |         1m58s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:51:11 | 200 |          2m4s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:52:20 | 200 |          2m9s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:52:50 | 200 |         1m33s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:54:04 | 200 |         1m39s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:54:57 | 200 |          2m2s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:56:10 | 200 |          2m2s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:56:51 | 200 |         1m48s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:57:58 | 200 |         1m44s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:58:40 | 200 |         1m44s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 09:59:51 | 200 |         1m49s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:00:27 | 200 |         1m41s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:01:38 | 200 |         1m43s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:02:28 | 200 |         1m55s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:03:42 | 200 |         1m59s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:04:29 | 200 |         1m56s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:05:39 | 200 |         1m53s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:06:13 | 200 |         1m38s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:07:25 | 200 |         1m42s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:08:03 | 200 |         1m44s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:09:15 | 200 |         1m46s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:10:36 | 200 |         2m28s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:12:07 | 200 |         2m47s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:12:37 | 200 |         1m46s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:14:00 | 200 |         1m49s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:14:33 | 200 |         1m50s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:15:53 | 200 |         1m49s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:16:36 | 200 |         1m58s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:17:52 | 200 |         1m55s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:18:35 | 200 |         1m54s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:19:54 | 200 |         1m57s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:20:42 | 200 |          2m1s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:22:26 | 200 |         2m28s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:23:18 | 200 |         2m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:24:44 | 200 |         2m14s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:25:27 | 200 |          2m4s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:26:53 | 200 |          2m5s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:27:22 | 200 |         1m50s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:28:43 | 200 |         1m45s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:29:13 | 200 |         1m45s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:30:40 | 200 |         1m53s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:31:27 | 200 |          2m8s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:32:52 | 200 |          2m7s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:33:26 | 200 |         1m53s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:35:08 | 200 |         2m12s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:36:01 | 200 |         2m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:37:38 | 200 |         2m26s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:38:24 | 200 |         2m18s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:40:16 | 200 |         2m33s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:40:56 | 200 |         2m26s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:42:39 | 200 |         2m19s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:43:48 | 200 |         2m46s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:45:12 | 200 |         2m29s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:46:04 | 200 |         2m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:47:33 | 200 |         2m16s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:48:07 | 200 |         1m58s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:49:36 | 200 |         1m59s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:50:08 | 200 |         1m55s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:51:36 | 200 |         1m56s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:52:32 | 200 |         2m19s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:54:02 | 200 |         2m22s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:54:42 | 200 |          2m4s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:56:16 | 200 |         2m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:56:58 | 200 |         2m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:58:41 | 200 |         2m21s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 10:59:42 | 200 |         2m39s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:01:16 | 200 |         2m31s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:01:56 | 200 |          2m9s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:03:31 | 200 |         2m11s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:04:13 | 200 |         2m11s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:05:47 | 200 |         2m12s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:06:38 | 200 |         2m20s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:08:11 | 200 |         2m21s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:08:53 | 200 |         2m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:10:37 | 200 |         2m21s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:11:22 | 200 |         2m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:12:59 | 200 |         2m18s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:13:53 | 200 |         2m26s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:15:26 | 200 |         2m22s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:16:22 | 200 |         2m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:18:31 | 200 |          3m1s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:19:16 | 200 |         2m48s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:21:31 | 200 |         2m56s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:22:27 | 200 |          3m6s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:24:09 | 200 |         2m34s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:24:58 | 200 |         2m25s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:26:41 | 200 |         2m28s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:27:24 | 200 |         2m20s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:29:07 | 200 |          2m8s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:30:09 | 200 |         2m39s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:31:52 | 200 |         2m41s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:32:37 | 200 |         2m22s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:34:29 | 200 |         2m33s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:35:19 | 200 |         2m37s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:37:01 | 200 |         2m28s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:38:01 | 200 |         2m36s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:39:45 | 200 |         2m27s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:40:37 | 200 |         2m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:42:25 | 200 |         2m36s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:43:17 | 200 |         2m34s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:44:57 | 200 |         2m27s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:46:59 | 200 |         3m36s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:48:53 | 200 |         3m52s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:50:46 | 200 |         3m42s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:52:34 | 200 |         3m37s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:53:33 | 200 |         2m41s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:55:36 | 200 |         2m58s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:56:28 | 200 |         2m49s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:58:12 | 200 |         2m32s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 11:58:59 | 200 |         2m25s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:01:12 | 200 |         2m55s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:02:51 | 200 |         3m46s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:04:46 | 200 |         3m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:05:48 | 200 |         2m51s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:07:45 | 200 |         2m54s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:08:36 | 200 |         2m32s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:10:47 | 200 |         2m58s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:12:51 | 200 |         4m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:14:46 | 200 |         3m55s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:15:33 | 200 |         2m37s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:17:26 | 200 |         2m36s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:18:17 | 200 |         2m38s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:20:11 | 200 |         2m41s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:21:18 | 200 |         2m55s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:23:21 | 200 |          3m5s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:24:21 | 200 |         2m58s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:26:27 | 200 |          3m2s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:28:03 | 200 |         3m36s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:30:10 | 200 |         3m38s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:31:04 | 200 |         2m55s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:33:07 | 200 |         2m53s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:34:06 | 200 |         2m57s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:36:05 | 200 |         2m54s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:36:55 | 200 |         2m43s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:38:54 | 200 |         2m45s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:39:42 | 200 |         2m42s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:41:57 | 200 |         2m59s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:42:55 | 200 |          3m8s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:44:52 | 200 |         2m51s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:45:42 | 200 |         2m41s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:47:58 | 200 |          3m2s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:49:06 | 200 |         3m18s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:51:12 | 200 |         3m10s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:52:00 | 200 |         2m48s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:54:02 | 200 |         2m45s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:54:55 | 200 |         2m50s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T12:54:55.689-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=131170 keep=4 new=131072
+[GIN] 2026/05/12 - 12:57:03 | 200 |         2m57s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 12:58:17 | 200 |         3m16s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T12:58:17.319-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=131912 keep=4 new=131072
+[GIN] 2026/05/12 - 13:00:18 | 200 |         3m11s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 13:01:11 | 200 |         2m49s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T13:01:11.992-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=132767 keep=4 new=131072
+[GIN] 2026/05/12 - 13:49:35 | 200 |        49m13s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 13:50:26 | 200 |        49m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T13:50:27.135-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=132767 keep=4 new=131072
+[GIN] 2026/05/12 - 13:52:44 | 200 |          3m9s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 13:53:48 | 200 |         3m16s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T13:53:48.570-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=133727 keep=4 new=131072
+[GIN] 2026/05/12 - 13:56:02 | 200 |         3m14s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 13:57:03 | 200 |         3m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T13:57:04.133-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=134663 keep=4 new=131072
+[GIN] 2026/05/12 - 14:00:29 | 200 |         4m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:01:19 | 200 |         4m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:01:20.139-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=134663 keep=4 new=131072
+[GIN] 2026/05/12 - 14:03:47 | 200 |         3m17s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:04:56 | 200 |         3m32s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:04:57.293-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=134663 keep=4 new=131072
+[GIN] 2026/05/12 - 14:07:10 | 200 |         3m22s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:08:02 | 200 |          3m0s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:08:02.892-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=134719 keep=4 new=131072
+[GIN] 2026/05/12 - 14:10:21 | 200 |         3m11s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:12:00 | 200 |         3m52s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:12:00.823-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=135692 keep=4 new=131072
+[GIN] 2026/05/12 - 14:14:02 | 200 |         3m37s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:15:06 | 200 |          3m0s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:15:06.528-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=135748 keep=4 new=131072
+[GIN] 2026/05/12 - 14:17:09 | 200 |          3m6s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:18:40 | 200 |         3m29s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:18:41.284-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=136650 keep=4 new=131072
+[GIN] 2026/05/12 - 14:21:15 | 200 |          4m2s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:22:39 | 200 |         3m52s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:22:39.353-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=137563 keep=4 new=131072
+[GIN] 2026/05/12 - 14:24:49 | 200 |         3m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:25:59 | 200 |         3m14s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:25:59.718-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=138418 keep=4 new=131072
+[GIN] 2026/05/12 - 14:28:30 | 200 |         3m37s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:29:39 | 200 |         3m34s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:29:39.931-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=139335 keep=4 new=131072
+[GIN] 2026/05/12 - 14:31:54 | 200 |         3m20s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:32:50 | 200 |          3m5s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:32:50.835-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=139335 keep=4 new=131072
+[GIN] 2026/05/12 - 14:35:03 | 200 |          3m8s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:35:52 | 200 |         2m57s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:35:53.112-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=139391 keep=4 new=131072
+[GIN] 2026/05/12 - 14:38:00 | 200 |         2m57s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:39:05 | 200 |          3m7s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:39:05.582-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=140357 keep=4 new=131072
+[GIN] 2026/05/12 - 14:41:18 | 200 |         3m14s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:42:11 | 200 |          3m1s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:42:12.051-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=141293 keep=4 new=131072
+[GIN] 2026/05/12 - 14:44:32 | 200 |          3m9s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:45:48 | 200 |         3m31s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:45:48.472-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=141293 keep=4 new=131072
+[GIN] 2026/05/12 - 14:47:56 | 200 |         3m24s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:48:56 | 200 |          3m3s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:48:57.215-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=142127 keep=4 new=131072
+[GIN] 2026/05/12 - 14:50:48 | 200 |         2m48s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:51:49 | 200 |         2m48s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:51:50.322-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=142127 keep=4 new=131072
+[GIN] 2026/05/12 - 14:54:38 | 200 |         3m49s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:56:04 | 200 |          4m9s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:56:04.431-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=143086 keep=4 new=131072
+[GIN] 2026/05/12 - 14:58:11 | 200 |         3m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 14:59:16 | 200 |          3m7s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T14:59:17.115-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=144021 keep=4 new=131072
+[GIN] 2026/05/12 - 15:01:19 | 200 |          3m3s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:02:18 | 200 |         2m56s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:02:18.534-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=145071 keep=4 new=131072
+[GIN] 2026/05/12 - 15:04:22 | 200 |          3m0s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:05:36 | 200 |         3m13s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:05:36.742-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=145127 keep=4 new=131072
+[GIN] 2026/05/12 - 15:07:37 | 200 |         3m14s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:08:51 | 200 |         3m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:08:51.904-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=146030 keep=4 new=131072
+[GIN] 2026/05/12 - 15:11:11 | 200 |         3m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:12:21 | 200 |         3m24s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:12:21.579-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=146966 keep=4 new=131072
+[GIN] 2026/05/12 - 15:14:14 | 200 |         2m59s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:15:28 | 200 |          3m2s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:15:28.619-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=146966 keep=4 new=131072
+[GIN] 2026/05/12 - 15:17:31 | 200 |         3m17s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:19:44 | 200 |         4m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:19:44.587-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=147022 keep=4 new=131072
+[GIN] 2026/05/12 - 15:21:55 | 200 |         4m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:23:14 | 200 |         3m24s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:23:14.615-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=148015 keep=4 new=131072
+[GIN] 2026/05/12 - 15:25:33 | 200 |         3m34s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:26:48 | 200 |         3m28s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:26:48.465-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=148071 keep=4 new=131072
+[GIN] 2026/05/12 - 15:28:58 | 200 |         3m24s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:29:53 | 200 |         2m59s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:29:53.434-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=148974 keep=4 new=131072
+[GIN] 2026/05/12 - 15:32:05 | 200 |          3m3s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:33:12 | 200 |         3m14s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:33:12.547-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=149975 keep=4 new=131072
+[GIN] 2026/05/12 - 15:35:23 | 200 |         3m13s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:36:27 | 200 |         3m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:36:28.113-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=150959 keep=4 new=131072
+[GIN] 2026/05/12 - 15:38:35 | 200 |          3m8s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:39:46 | 200 |         3m13s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:39:46.802-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=151919 keep=4 new=131072
+[GIN] 2026/05/12 - 15:42:02 | 200 |         3m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:43:37 | 200 |         3m45s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:43:37.700-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=152923 keep=4 new=131072
+[GIN] 2026/05/12 - 15:46:02 | 200 |         3m56s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:47:52 | 200 |         4m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:47:53.255-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=153882 keep=4 new=131072
+[GIN] 2026/05/12 - 15:50:37 | 200 |         4m32s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:52:10 | 200 |         4m12s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:52:10.735-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=154886 keep=4 new=131072
+[GIN] 2026/05/12 - 15:54:14 | 200 |         3m32s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:55:28 | 200 |         3m12s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:55:28.440-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=155803 keep=4 new=131072
+[GIN] 2026/05/12 - 15:57:48 | 200 |         3m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 15:59:01 | 200 |         3m28s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T15:59:01.898-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=156851 keep=4 new=131072
+[GIN] 2026/05/12 - 16:01:22 | 200 |         3m30s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:03:22 | 200 |         4m16s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:03:23.311-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=157746 keep=4 new=131072
+[GIN] 2026/05/12 - 16:06:03 | 200 |         4m37s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:07:06 | 200 |         3m38s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:07:07.385-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=158791 keep=4 new=131072
+[GIN] 2026/05/12 - 16:09:17 | 200 |          3m9s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:10:43 | 200 |         3m31s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:10:43.538-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=159727 keep=4 new=131072
+[GIN] 2026/05/12 - 16:13:05 | 200 |         3m44s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:14:10 | 200 |         3m22s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:14:10.785-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=159727 keep=4 new=131072
+[GIN] 2026/05/12 - 16:16:29 | 200 |         3m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:17:53 | 200 |         3m38s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:17:53.937-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=160776 keep=4 new=131072
+[GIN] 2026/05/12 - 16:20:35 | 200 |          4m2s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:21:53 | 200 |         3m54s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:21:53.950-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=161663 keep=4 new=131072
+[GIN] 2026/05/12 - 16:24:32 | 200 |         3m52s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:25:30 | 200 |         3m31s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:25:30.491-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=161663 keep=4 new=131072
+[GIN] 2026/05/12 - 16:27:53 | 200 |         3m21s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:29:10 | 200 |         3m35s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:29:11.050-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=161663 keep=4 new=131072
+[GIN] 2026/05/12 - 16:31:30 | 200 |         3m36s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:32:37 | 200 |         3m21s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:32:37.514-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=162733 keep=4 new=131072
+[GIN] 2026/05/12 - 16:35:09 | 200 |         3m35s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:36:20 | 200 |         3m38s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:36:20.930-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=163715 keep=4 new=131072
+[GIN] 2026/05/12 - 16:38:42 | 200 |         3m29s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:40:00 | 200 |         3m34s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:40:00.693-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=163771 keep=4 new=131072
+[GIN] 2026/05/12 - 16:42:06 | 200 |         3m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:43:30 | 200 |         3m24s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:43:30.552-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=164671 keep=4 new=131072
+[GIN] 2026/05/12 - 16:45:37 | 200 |         3m27s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 16:46:58 | 200 |         3m22s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T16:46:58.598-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=165582 keep=4 new=131072
+[GIN] 2026/05/12 - 17:11:53 | 200 |        26m12s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 17:13:25 | 200 |        26m22s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T17:13:25.850-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=165582 keep=4 new=131072
+[GIN] 2026/05/12 - 17:59:31 | 200 |        47m38s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:00:49 | 200 |        47m19s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:00:50.418-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=165582 keep=4 new=131072
+[GIN] 2026/05/12 - 18:03:44 | 200 |         4m13s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:05:13 | 200 |         4m18s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:05:13.887-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=165582 keep=4 new=131072
+[GIN] 2026/05/12 - 18:07:10 | 200 |         3m25s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:08:18 | 200 |          3m0s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:08:18.999-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=166346 keep=4 new=131072
+[GIN] 2026/05/12 - 18:10:36 | 200 |         3m23s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:11:52 | 200 |         3m28s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:11:52.456-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=167419 keep=4 new=131072
+[GIN] 2026/05/12 - 18:14:06 | 200 |         3m26s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:15:22 | 200 |         3m25s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:15:22.503-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=168379 keep=4 new=131072
+[GIN] 2026/05/12 - 18:17:53 | 200 |         3m43s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:19:19 | 200 |         3m52s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:19:20.351-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=169293 keep=4 new=131072
+[GIN] 2026/05/12 - 18:21:33 | 200 |         3m36s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:22:43 | 200 |         3m18s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:22:43.698-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=169293 keep=4 new=131072
+[GIN] 2026/05/12 - 18:47:44 | 200 |        26m11s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:49:13 | 200 |        26m25s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:49:14.110-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=169293 keep=4 new=131072
+[GIN] 2026/05/12 - 18:51:40 | 200 |         3m55s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:52:51 | 200 |         3m33s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:52:52.350-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=170256 keep=4 new=131072
+[GIN] 2026/05/12 - 18:55:42 | 200 |         3m58s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 18:57:00 | 200 |          4m3s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T18:57:00.885-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=171217 keep=4 new=131072
+[GIN] 2026/05/12 - 18:59:45 | 200 |         3m59s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:01:39 | 200 |         4m33s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:01:39.752-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=172134 keep=4 new=131072
+[GIN] 2026/05/12 - 19:03:42 | 200 |         3m52s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:04:54 | 200 |         3m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:04:55.226-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=173095 keep=4 new=131072
+[GIN] 2026/05/12 - 19:07:02 | 200 |         3m16s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:08:40 | 200 |         3m40s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:08:41.120-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=173095 keep=4 new=131072
+[GIN] 2026/05/12 - 19:11:02 | 200 |          4m0s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:12:14 | 200 |         3m29s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:12:15.386-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=174055 keep=4 new=131072
+[GIN] 2026/05/12 - 19:14:38 | 200 |         3m32s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:15:59 | 200 |         3m39s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:15:59.705-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=174777 keep=4 new=131072
+[GIN] 2026/05/12 - 19:35:05 | 200 |        20m22s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:36:11 | 200 |         20m7s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:36:12.398-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=174777 keep=4 new=131072
+[GIN] 2026/05/12 - 19:38:49 | 200 |         3m44s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:40:22 | 200 |          4m5s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:40:23.161-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=175825 keep=4 new=131072
+[GIN] 2026/05/12 - 19:43:08 | 200 |         4m15s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:45:09 | 200 |         4m41s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:45:10.046-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=176804 keep=4 new=131072
+[GIN] 2026/05/12 - 19:47:39 | 200 |         4m27s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:49:40 | 200 |         4m25s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:49:40.930-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=177699 keep=4 new=131072
+[GIN] 2026/05/12 - 19:51:51 | 200 |          4m8s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:53:14 | 200 |         3m29s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:53:15.053-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=178531 keep=4 new=131072
+[GIN] 2026/05/12 - 19:55:12 | 200 |         3m17s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 19:56:53 | 200 |         3m33s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T19:56:53.939-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=178587 keep=4 new=131072
+[GIN] 2026/05/12 - 19:59:09 | 200 |         3m56s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:00:32 | 200 |         3m34s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:00:33.347-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=179511 keep=4 new=131072
+[GIN] 2026/05/12 - 20:02:38 | 200 |         3m24s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:03:56 | 200 |         3m18s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:03:57.404-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=179567 keep=4 new=131072
+[GIN] 2026/05/12 - 20:06:17 | 200 |         3m39s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:07:27 | 200 |         3m25s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:07:27.960-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=180490 keep=4 new=131072
+[GIN] 2026/05/12 - 20:09:34 | 200 |         3m13s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:10:46 | 200 |         3m13s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:10:46.815-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=181493 keep=4 new=131072
+[GIN] 2026/05/12 - 20:13:09 | 200 |         3m31s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:14:20 | 200 |         3m28s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:14:20.525-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=182409 keep=4 new=131072
+[GIN] 2026/05/12 - 20:16:58 | 200 |         3m45s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:18:12 | 200 |         3m46s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:18:12.457-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=183458 keep=4 new=131072
+[GIN] 2026/05/12 - 20:20:13 | 200 |         3m11s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:21:40 | 200 |         3m23s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:21:40.850-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=184417 keep=4 new=131072
+[GIN] 2026/05/12 - 20:24:05 | 200 |         3m48s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:25:26 | 200 |         3m32s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:25:26.861-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=185418 keep=4 new=131072
+[GIN] 2026/05/12 - 20:27:32 | 200 |         3m22s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:28:53 | 200 |         3m21s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:28:53.669-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=186402 keep=4 new=131072
+[GIN] 2026/05/12 - 20:31:14 | 200 |         3m38s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:32:42 | 200 |         3m44s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:32:43.037-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=187362 keep=4 new=131072
+[GIN] 2026/05/12 - 20:35:16 | 200 |         3m59s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:36:39 | 200 |         3m51s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:36:39.713-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=187418 keep=4 new=131072
+[GIN] 2026/05/12 - 20:38:42 | 200 |         3m25s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:40:03 | 200 |         3m11s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:40:03.567-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=188451 keep=4 new=131072
+[GIN] 2026/05/12 - 20:42:12 | 200 |         3m26s |       127.0.0.1 | POST     "/api/chat"
+[GIN] 2026/05/12 - 20:43:21 | 200 |          3m7s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:43:22.229-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=189386 keep=4 new=131072
+[GIN] 2026/05/12 - 20:46:00 | 200 |         3m45s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:46:02.181-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=189386 keep=4 new=131072
+[GIN] 2026/05/12 - 20:48:14 | 200 |         2m13s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:48:15.635-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=189386 keep=4 new=131072
+[GIN] 2026/05/12 - 20:50:25 | 200 |         2m10s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:50:29.971-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=190220 keep=4 new=131072
+[GIN] 2026/05/12 - 20:52:38 | 200 |          2m9s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:52:39.774-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=190220 keep=4 new=131072
+[GIN] 2026/05/12 - 20:54:43 | 200 |          2m4s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:54:48.227-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=191115 keep=4 new=131072
+[GIN] 2026/05/12 - 20:56:56 | 200 |          2m9s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:57:01.208-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=191903 keep=4 new=131072
+[GIN] 2026/05/12 - 20:59:05 | 200 |          2m5s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T20:59:06.890-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=191959 keep=4 new=131072
+[GIN] 2026/05/12 - 21:01:06 | 200 |          2m1s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:01:11.747-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=192927 keep=4 new=131072
+[GIN] 2026/05/12 - 21:03:34 | 200 |         2m24s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:03:39.661-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=193931 keep=4 new=131072
+[GIN] 2026/05/12 - 21:05:47 | 200 |          2m8s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:05:52.040-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=194848 keep=4 new=131072
+[GIN] 2026/05/12 - 21:08:18 | 200 |         2m27s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:08:19.334-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=194848 keep=4 new=131072
+[GIN] 2026/05/12 - 21:11:03 | 200 |         2m45s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:11:08.418-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=195896 keep=4 new=131072
+[GIN] 2026/05/12 - 21:13:16 | 200 |          2m9s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:13:21.827-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=196854 keep=4 new=131072
+[GIN] 2026/05/12 - 21:15:32 | 200 |         2m11s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:15:37.115-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=197790 keep=4 new=131072
+[GIN] 2026/05/12 - 21:18:02 | 200 |         2m26s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:18:07.589-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=198623 keep=4 new=131072
+[GIN] 2026/05/12 - 21:20:23 | 200 |         2m16s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:20:28.490-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=199541 keep=4 new=131072
+[GIN] 2026/05/12 - 21:22:26 | 200 |         1m59s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:22:27.658-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=199541 keep=4 new=131072
+[GIN] 2026/05/12 - 21:24:33 | 200 |          2m7s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:24:38.517-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=200566 keep=4 new=131072
+[GIN] 2026/05/12 - 21:26:53 | 200 |         2m15s |       127.0.0.1 | POST     "/api/chat"
+time=2026-05-12T21:26:58.039-07:00 level=WARN source=runner.go:187 msg="truncating input prompt" limit=131072 prompt=201569 keep=4 new=131072
+[GIN] 2026/05/12 - 21:29:05 | 200 |          2m9s |       127.0.0.1 | POST     "/api/chat"

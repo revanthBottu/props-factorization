@@ -118,51 +118,71 @@ The episode reward is:
 The smoothness and collision terms are emitted incrementally; shot-quality
 terms are terminal. The sum and all six components are available in
 `info["reward_components"]`. First-impact offset, centrality, both wrist
-states, and collision counts are also in `info` and the saved history.
+states, and collision counts are also in `info`. Older standalone runs saved
+these in `rl_runs/*/history.json`.
 
-`run_golf_rl.py` uses regular ProPS only: `action = state @ W`, with one full
-11-by-2 matrix. No LU, QR, SVD, factor matrices, ranks, or factorization
-options are used. Rows are named by `FEATURE_NAMES` and cover two positioning
-windows, three later swing windows, position error/speed/gravity feedback,
-and post-shot swing hold feedback. Columns are always:
+The golf task is registered as `envs.golf:GolfSwing-v0` for the same
+`ContinualSpaceGeneralWorld`, linear policy agent, YAML configuration, and
+training loop used by the other ProPS Gymnasium tasks. Its configuration is
+`props-factorization/configs/golf/golf_props.yaml`. It uses the same
+`num_optim.j2` prompt template as the other numerical ProPS tasks; the
+config supplies this task's parameter range and brief environment context.
+It uses regular ProPS:
+`action = state @ W`, with one full 11-by-2 matrix. Rows are named by
+`FEATURE_NAMES` and cover two positioning windows, three later swing windows,
+position error/speed/gravity feedback, and post-shot swing hold feedback.
+Columns are always:
 
 1. `position_joint4_torque_nm`
 2. `swing_joint5_torque_nm`
 
-Each episode saves:
+New runs use the same log layout as `props-llm-1` under
+`props-factorization/logs/golf_props_num_optim/`: `overall_log.txt`, a `warmup/`
+directory containing `warmup_rollout_0.txt` and plots, and one `episode_N/`
+directory per LLM proposal. Each episode directory contains `parameters.txt`,
+`parameters_reasoning.txt`, `training_rollout.txt`, `reward_progress.png`,
+`policy_heatmap_epN.png`, and `best_videos/` when a new best is recorded.
+The run root receives `policy_heatmaps.gif` when training completes. The
+first warmup uses the demonstrated two-joint matrix from the config.
+Earlier standalone `rl_runs/` histories remain in their original format;
+they do not contain the per-step trajectories needed for ProPS rollout logs.
 
-- `reward_progress.png` plus an episode-specific reward graph snapshot;
-- `policy_heatmap_epNNN.png` for the exact 11-by-2 matrix used;
-- updated `history.json` and `best_matrix.json`;
-- an MP4 under `best_videos/` whenever a new best is found.
-
-The best-video rollout is replayed from reset and checked against the
-evaluated reward. `--record-video` additionally records every proposal under
-`all_videos/`. Use `--camera overview` or `--camera impact` for other views.
-
-Install and run an offline baseline (no API key or display required):
+From an environment with the ProPS and golf dependencies installed, run a
+warmup-only check without an API call from the repository root:
 
 ```bash
-python -m pip install gymnasium numpy mujoco matplotlib imageio imageio-ffmpeg
 cd simulationsetup
-python run_golf_rl.py
+OPENAI_API_KEY=test-only python run_golf_rl.py --iterations 0
 ```
 
-For LLM revisions through ASU Research Computing:
+For LLM training through ASU Research Computing, set `OPENAI_API_KEY` in
+`simulationsetup/.env` or the shell, then run either:
 
 ```bash
-python -m pip install openai python-dotenv
-# Set OPENAI_API_KEY in simulationsetup/.env or the shell.
+cd props-factorization
+python main.py --config configs/golf/golf_props.yaml
+```
+
+or, from the repository's `simulationsetup` directory:
+
+```bash
 python run_golf_rl.py --iterations 10
 ```
 
-The runner uses `OPENAI_BASE_URL` and `OPENAI_MODEL` when set and never writes
-the API key to results. The LLM receives feature names, action columns, recent
-reward breakdowns, and an explicit instruction to return a complete regular
-11-by-2 matrix without factors. Re-evaluate a saved policy with
-`python run_golf_rl.py --matrix rl_runs/DATE/best_matrix.json`.
+Both commands use the same ProPS runner and log format. The wrapper accepts
+`--output-dir`, `--model`, and `--matrix` to override the config; a matrix
+file must contain an 11-by-2 `matrix` field and becomes the first warmup
+policy. The config selects `asu/gemma4-31b-it` by default. The ASU provider
+uses `OPENAI_BASE_URL` if set, otherwise `https://openai.rc.asu.edu/v1`.
+The API key is never written to the log files. The config supplies the
+11 state row groups and both action columns as prompt context, and the
+generic template requests the full unfactorized matrix in ProPS `params[i]`
+format.
 
 Use the environment directly with `GolfRLEnv`, or through Gymnasium with
 `gym.make("golf_rl_env:GolfSwing-v0")` when `simulationsetup` is on
 `PYTHONPATH`. Run `python -m unittest test_golf_rl.py` for the API, reward,
-two-joint necessity, determinism, and prompt checks.
+two-joint necessity, determinism, and standalone helper checks. From the
+inner `props-factorization` directory, run
+`python -m unittest test_golf_props_integration.py` for the shared runner and
+ProPS log layout.

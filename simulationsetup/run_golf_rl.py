@@ -1,8 +1,8 @@
-"""Run regular ProPS matrix search on the deterministic two-joint golf task.
+"""Run the two-joint golf task through the shared ProPS Gymnasium workflow.
 
-Every evaluated episode gets a reward plot and policy heatmap. Whenever an
-episode sets a new best reward, its deterministic replay is saved as an MP4.
-No matrix factorization is used.
+The older standalone rollout helpers remain importable for analysis, while
+the CLI uses the same YAML configuration, agent, and log layout as other ProPS
+environments.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 import platform
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +22,7 @@ if (platform.system() == "Linux"
     os.environ["MUJOCO_GL"] = "osmesa"
 
 from golf_rl_env import (ACTION_NAMES, DEFAULT_MATRIX, FEATURE_NAMES,
-                         GolfRLEnv, MatrixGolfPolicy, TORQUE_LIMITS_NM)
+                         GolfRLEnv, MatrixGolfPolicy)
 
 
 HERE = Path(__file__).resolve().parent
@@ -332,43 +331,44 @@ def train(iterations: int, initial_matrix=DEFAULT_MATRIX, *, model: str | None =
 
 
 def main() -> None:
+    """Run golf through the same config, agent, and logs as other ProPS tasks."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--iterations", type=int, default=0,
-                        help="number of LLM matrix revisions after the baseline")
+    parser.add_argument("--iterations", "--episodes", type=int,
+                        help="number of ProPS LLM training episodes (default: config value)")
     parser.add_argument("--matrix", type=Path,
-                        help="JSON file with an 11x2 'matrix' field")
-    parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL") or DEFAULT_MODEL)
-    parser.add_argument("--duration", type=float, default=5.0)
+                        help="JSON file with an 11x2 'matrix' field for warmup")
+    parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL"))
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--record-video", action="store_true",
-                        help="also record every trial; new bests are always recorded")
-    parser.add_argument("--no-best-video", action="store_true",
-                        help="disable automatic MP4 recording for new bests")
-    parser.add_argument("--no-plots", action="store_true",
-                        help="disable per-episode reward graphs and heatmaps")
-    parser.add_argument("--camera", choices=VIDEO_CAMERAS, default="swing")
     args = parser.parse_args()
+    import sys
+    import yaml
 
-    matrix = (parse_matrix_json(args.matrix.read_text(encoding="utf-8"))
-              if args.matrix else DEFAULT_MATRIX)
-    output_dir = args.output_dir
-    if output_dir is None:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        output_dir = HERE / "rl_runs" / stamp
-    print(f"Features ({len(FEATURE_NAMES)} matrix rows): {', '.join(FEATURE_NAMES)}")
-    print(f"Actions (2 matrix columns): {', '.join(ACTION_NAMES)}")
-    print(f"Torque limits: +/-{TORQUE_LIMITS_NM.tolist()} N m")
-    print("Policy type: regular ProPS (one full matrix; factorization disabled)")
-    print(f"Results: {output_dir}")
-    history = train(
-        args.iterations, matrix, model=args.model, output_dir=output_dir,
-        duration_s=args.duration, record_video=args.record_video,
-        record_best_video=not args.no_best_video, camera=args.camera,
-        create_plots=not args.no_plots,
-    )
-    best = max(history, key=lambda entry: entry["reward"])
-    print(f"Best trial: {best['trial']}; reward={best['reward']:.4f}; "
-          f"distance={best['distance_to_hole_m']:.3f} m")
+    props_dir = HERE.parent / "props-factorization"
+    config_path = props_dir / "configs" / "golf" / "golf_props.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if args.iterations is not None:
+        config["num_episodes"] = args.iterations
+    if args.model:
+        config["llm_model_name"] = (args.model if "/" in args.model
+                                    else f"asu/{args.model}")
+    if args.output_dir:
+        config["logdir"] = str(args.output_dir.resolve())
+    if args.matrix:
+        config["initial_matrix"] = parse_matrix_json(
+            args.matrix.read_text(encoding="utf-8")
+        ).tolist()
+
+    if str(props_dir) not in sys.path:
+        sys.path.insert(0, str(props_dir))
+    from runner.llm_num_optim_runner import run_training_loop
+
+    # ProPS uses config paths relative to its project directory.
+    previous_dir = Path.cwd()
+    try:
+        os.chdir(props_dir)
+        run_training_loop(**config)
+    finally:
+        os.chdir(previous_dir)
 
 
 if __name__ == "__main__":
